@@ -4,12 +4,10 @@
 ############# Importation des librairies ####################
 #############################################################
 
-import os
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 import pickle as pkl
 
-import json
 import novae
 import torch
 import anndata as ad
