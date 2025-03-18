@@ -14,6 +14,11 @@ It includes:
 
 Functions that require `pipeline_clinical` to have been run first are explicitly documented.
 
+Output Structure:
+    - "settings": Dictionary detailing the settings used for computing the embeddings (including computation date).
+    - "data": Dictionary mapping patient IDs (e.g., "HK_G_***") to their corresponding embedding (torch.Tensor).
+    - "dataset": Additional dictionary containing metadata such as id2row mapping, feature names, target names, and full tensors of features and targets.
+
 Dependencies:
     - torch
     - pandas
@@ -40,6 +45,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import KNNImputer
 import prince
 import torch
+import datetime
 import re
 from typing import Dict, Tuple, Optional, Union
 
@@ -54,7 +60,7 @@ def correct_patient_id(sample_id: str) -> str:
     match = re.match(r"(.*)b$", sample_id)
     if match:
         base_id = match.group(1)
-        numeric_part = re.search(r"(\\d+)", base_id)
+        numeric_part = re.search(r"(\d+)", base_id)
         if numeric_part:
             num_str = numeric_part.group(0)
             new_num = str(int(num_str) - 1).zfill(len(num_str))
@@ -81,10 +87,13 @@ def load_data(
     Load preprocessed clinical data from a saved file or dictionary.
 
     Args:
-        data: File path or preloaded dictionary.
+        data: File path or preloaded dictionary (should be the output of pipeline_clinical).
 
     Returns:
-        Dictionary containing processed data tensors.
+        Dictionary containing processed data tensors with keys:
+            - "settings": computation settings.
+            - "data": dictionary mapping patient IDs to embeddings.
+            - "dataset": additional metadata (id2row, features, targets, X, Y).
     """
     if data is None:
         try:
@@ -103,7 +112,11 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
     Prepare clinical data by handling inconsistencies, defining features, and imputing missing values.
 
     Returns:
-        Tuple containing the processed DataFrame, categorical features, numerical features, and targets.
+        Tuple containing:
+            - Processed DataFrame with corrections and missing values handled.
+            - List of categorical feature names.
+            - List of numerical feature names.
+            - List of target column names.
     """
     gbm_df = get_data()
     gbm_df["corrected_patient_id"] = gbm_df.index.map(correct_patient_id)
@@ -138,17 +151,22 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
 
 def pipeline_clinical(
     verbose: bool = False, save: bool = False, save_path: str = "clinical_data.pt"
-) -> Dict[str, torch.Tensor]:
+) -> Dict[str, Union[Dict, Dict[str, torch.Tensor]]]:
     """
     Process clinical data, compute embeddings, and save the output.
 
+    The output structure is:
+        - "settings": Dictionary detailing the computation settings and the date.
+        - "data": Dictionary mapping each patient ID (e.g., "HK_G_***") to its corresponding embedding (torch.Tensor).
+        - "dataset": Additional metadata including id2row mapping, feature names, target names, and full tensors for features (X) and targets (Y).
+
     Args:
-        verbose: Print progress messages if True.
-        save: Save the processed data if True.
-        save_path: File path for saving the data.
+        verbose: If True, prints progress messages.
+        save: If True, saves the output to the specified path.
+        save_path: File path to save the processed data.
 
     Returns:
-        Dictionary containing processed data tensors.
+        Dictionary with keys "settings", "data", and "dataset" as described above.
     """
     if verbose:
         print("Preparing Data...")
@@ -175,11 +193,26 @@ def pipeline_clinical(
     complete_df = norm_num_gbm_df.join(mca_gbm_df)
 
     id2row = {patient_id: i for i, patient_id in enumerate(gbm_df.index)}
-    output = {
+    dataset = {
         "id2row": id2row,
+        "features": cat_features + num_features,
+        "targets": targets,
         "X": torch.tensor(complete_df.values),
         "Y": torch.tensor(target_df.values),
     }
+
+    settings = {
+        "model": "Clinical Embedding Pipeline",
+        "date": datetime.datetime.now().isoformat(),
+    }
+
+    # Create dictionary mapping each patient_id to its embedding vector.
+    data = {
+        patient_id: torch.tensor(complete_df.loc[patient_id].values)
+        for patient_id in complete_df.index
+    }
+
+    output = {"settings": settings, "data": data, "dataset": dataset}
 
     if save:
         torch.save(output, save_path)
@@ -190,43 +223,43 @@ def get_emb(
     patient_id: str, data: Optional[Union[str, Dict[str, torch.Tensor]]] = None
 ) -> torch.Tensor:
     """
-    Retrieve clinical embedding for a specific patient.
+    Retrieve the clinical embedding for a specific patient.
 
     Requires `pipeline_clinical` to have been run first.
 
     Args:
-        patient_id: Patient identifier.
-        data: Preprocessed data dictionary or path to saved file.
+        patient_id: The patient identifier (e.g., "HK_G_***").
+        data: Preprocessed data dictionary or file path to the saved output from pipeline_clinical.
 
     Returns:
-        Torch tensor representing the patient's embedding.
+        Torch tensor representing the embedding for the specified patient.
     """
     data = load_data(data)
-    return data["X"][data["id2row"][patient_id]]
+    return data["data"][patient_id]
 
 
 def get_batch(
     patient_ids: list, data: Optional[Union[str, Dict[str, torch.Tensor]]] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Retrieve clinical embeddings and targets for a batch of patients.
+    Retrieve clinical embeddings and corresponding targets for a batch of patients.
 
     Requires `pipeline_clinical` to have been run first.
 
     Args:
         patient_ids: List of patient identifiers.
-        data: Preprocessed data dictionary or path to a saved file.
+        data: Preprocessed data dictionary or file path to the saved output from pipeline_clinical.
 
     Returns:
         Tuple containing:
-        - Torch tensor of shape (batch_size, num_features) with patient embeddings.
-        - Torch tensor of shape (batch_size, num_targets) with corresponding target values.
+            - A torch tensor of shape (batch_size, num_features) with the patient embeddings.
+            - A torch tensor of shape (batch_size, num_targets) with the corresponding target values.
 
     Raises:
         ValueError: If any patient ID is not found in the data.
     """
     data = load_data(data)
-    id2row = data["id2row"]
+    id2row = data["dataset"]["id2row"]
 
     tensor_indices = []
     for patient_id in patient_ids:
@@ -235,45 +268,45 @@ def get_batch(
         tensor_indices.append(id2row[patient_id])
 
     selection_mask = torch.LongTensor(tensor_indices)
-    return data["X"][selection_mask, :], data["Y"][selection_mask, :]
+    return data["dataset"]["X"][selection_mask, :], data["dataset"]["Y"][
+        selection_mask, :
+    ]
 
 
 def get_all_embeddings(
-    data: Optional[Union[str, Dict[str, torch.Tensor]]] = None, format: str = "tensor"
+    data: Optional[Union[str, Dict[str, torch.Tensor]]] = None, format: str = "dict"
 ) -> Union[Dict[str, torch.Tensor], torch.Tensor]:
     """
-    Retrieve all patient embeddings, either as a dictionary or a single tensor.
+    Retrieve all patient embeddings.
 
     Requires `pipeline_clinical` to have been run first.
 
     Args:
-        data: Preprocessed data dictionary or path to a saved file.
+        data: Preprocessed data dictionary or file path to the saved output from pipeline_clinical.
         format: Output format. Options:
-            - "dict" (default): Returns a dictionary mapping patient IDs to embeddings.
-            - "tensor": Returns a single torch.Tensor containing all embeddings.
+            - "dict": Returns a dictionary mapping patient IDs to their embeddings.
+            - "tensor": Returns a single torch tensor of shape (num_patients, num_features).
 
     Returns:
-        - If format="dict": Dictionary {patient_id: torch.Tensor(embedding)}.
-        - If format="tensor": A single torch.Tensor of shape (num_patients, num_features).
+        - If format is "dict": Dictionary {patient_id: torch.Tensor(embedding)}.
+        - If format is "tensor": A torch tensor containing embeddings for all patients.
 
     Raises:
         ValueError: If an invalid format is specified.
     """
     data = load_data(data)
-
     if format == "dict":
-        return {
-            patient_id: get_emb(patient_id, data)
-            for patient_id in data["id2row"].keys()
-        }
+        return data["data"]
     elif format == "tensor":
-        return data["X"]
+        # Convert dictionary of embeddings to a tensor by stacking along the first dimension.
+        embeddings = list(data["data"].values())
+        return torch.stack(embeddings)
     else:
         raise ValueError(f"Invalid format '{format}'. Use 'dict' or 'tensor'.")
 
 
 if __name__ == "__main__":
     # Example usage:
-    # To run inference for all patients:
+    # To run inference for all patients and generate the embeddings:
     result = pipeline_clinical(verbose=False, save=False, save_path="clinical_data.pt")
     print("Pipeline complete.")
