@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from gbmhackathon.s3_loader import get_s3_dataset_info
 
 
 def generate_data_paths_mosaic(
@@ -10,7 +11,6 @@ def generate_data_paths_mosaic(
     wes_path: Path,
     single_cell_path: Path,
     he_path: Path,
-    he_features_path: Path,
     visium_path: Path,
 ):
     """Generate a dictionary of data paths."""
@@ -34,7 +34,7 @@ def generate_data_paths_mosaic(
         "Single cell anndata": single_cell_path
         / "preprocessed/sc_merged_annotated.h5ad",
         "HE": he_path,
-        "HE_features_H1": he_features_path,
+        # "HE_features_H1": he_features_path,
         "Visium anndata": visium_path,
     }
 
@@ -48,19 +48,27 @@ def generate_data_paths_bruce(
         "MIBI_tumor_images": global_path,
     }
 
-HOME_PATH = Path(os.environ["HOME"])
-DATA_PATH = HOME_PATH / "SageMaker" / "data"
-MOSAIC_PATH = DATA_PATH / "mosaic_dataset"
-BRUCE_PATH = DATA_PATH / "bruce_dataset"
+# HOME_PATH = Path(os.environ["HOME"])
+# DATA_PATH = HOME_PATH / "SageMaker" / "data"
+# MOSAIC_PATH = DATA_PATH / "mosaic_dataset"
+# BRUCE_PATH = DATA_PATH / "bruce_dataset"
+
+### S3 loading
+
+MOSAIC_ENV_VAR = "ABSTRA_DATASET_03bb30aa_16ed_4b89_913e_fe009db2aabd"
+BRUCE_ENV_VAR = "ABSTRA_DATASET_8bfd41bf_a110_4748_bda1_8c225cdde6b5"
+
+MOSAIC_BUCKET, MOSAIC_PATH = get_s3_dataset_info(dataset_name= MOSAIC_ENV_VAR)
+BRUCE_BUCKET, BRUCE_PATH = get_s3_dataset_info(dataset_name= BRUCE_ENV_VAR)
+
 
 DATA_PATH_FILES_MOSAIC = generate_data_paths_mosaic(
-    MOSAIC_PATH / "Clinical",
-    MOSAIC_PATH / "RNAseq",
-    MOSAIC_PATH / "WES",
-    MOSAIC_PATH / "single_cell",
-    MOSAIC_PATH / "Visium" / "converted_he",
-    DATA_PATH / "h1_bioptimus_features",  # H1 features
-    MOSAIC_PATH / "Visium" / "spaceranger_count",
+    clinical_path = MOSAIC_PATH / "Clinical",
+    bulkrna_path = MOSAIC_PATH / "RNAseq",
+    wes_path = MOSAIC_PATH / "WES",
+    single_cell_path = MOSAIC_PATH / "single_cell",
+    he_path = MOSAIC_PATH / "Visium" / "converted_he",
+    visium_path = MOSAIC_PATH / "Visium" / "spaceranger_count"
 )
 
 DATA_PATH_FILES_BRUCE = generate_data_paths_bruce(
