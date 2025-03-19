@@ -167,13 +167,13 @@ MosaicDataset = DataCenter(
                         data_transformer=MOSAICHEDataCleaner(),
                     ),
                 ),
-                "H1 features": DataFile(
-                    name=DATA_PATH_FILES_MOSAIC["HE_features_H1"],
-                    loader=PathsLoader(
-                        pattern_files="*_eHnE.zarr",
-                        data_transformer=MOSAICHEFeaturesDataCleaner(),
-                    ),
-                ),
+                # "H1 features": DataFile(
+                #     name=DATA_PATH_FILES_MOSAIC["HE_features_H1"],
+                #     loader=PathsLoader(
+                #         pattern_files="*_eHnE.zarr",
+                #         data_transformer=MOSAICHEFeaturesDataCleaner(),
+                #     ),
+                # ),
             },
         ),
     },
