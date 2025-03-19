@@ -122,7 +122,7 @@ class CSVDataLoader(BaseDataLoader):
         y : DataFrame
             Data corresponding to target columns with index as patient ids.
         """
-        with self.s3.get_object(Bucket = self.bucket, Key = str(data_path)) as file_obj : 
+        with self.s3.get_object(Bucket = self.bucket, Key = str(data_path))["Body"] as file_obj : 
             data = pd.read_csv(filepath_or_buffer=file_obj, **self.load_data_kwargs)
             if self.data_transformer is not None:
                 data = self.data_transformer.transform(data)
@@ -186,6 +186,7 @@ class SingleCellLoader:
         adata : anndata
             The anndata object.
         """
+
         adata = ad.read_h5ad(path_data)
         return adata
 
