@@ -172,6 +172,9 @@ class PathsLoader(BaseDataLoader):
 
 class SingleCellLoader:
     """Class to load the single cell anndata."""
+    def __init__(self, bucket = None) : 
+        self.s3 = boto3.client("s3")
+        self.bucket = bucket
 
     def load_data(self, path_data):
         """Load the single cell data.
@@ -187,7 +190,8 @@ class SingleCellLoader:
             The anndata object.
         """
 
-        adata = ad.read_h5ad(path_data)
+        with self.s3.get_object(Bucket = self.bucket, Key = path_data)["Body"].read() as file_obj :
+            adata = ad.read_h5ad(file_obj)
         return adata
 
 
