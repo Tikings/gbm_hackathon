@@ -51,7 +51,7 @@ class DataCenter(NamedTuple):
             if source_name in ["metadata", "clinical", "bulk_rna", "wes", "he", "mibi_images"]
         }
 
-    def load_singlecell(self):
+    def load_singlecell(self, bucket):
         """Load single-cell data.
 
         Returns
@@ -60,7 +60,7 @@ class DataCenter(NamedTuple):
             Dictionary of dataframes for each source that are single-cell.
         """
         file_path = self.sources["sc_rna"].files["scRNA anndata"].name
-        return SingleCellLoader().load_data(file_path)
+        return SingleCellLoader(bucket = bucket).load_data(file_path)
 
     def load_visium(
         self, sample_list: Optional[List[str]] = None, resolution: str = "lowres"
