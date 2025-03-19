@@ -5,12 +5,13 @@ import os
 import anndata as ad
 import pandas as pd
 import scanpy as sc
+import boto3
 
 
 class BaseDataLoader:
     """Base class for loader."""
 
-    def __init__(self, data_transformer=None, **load_data_kwargs):
+    def __init__(self, data_transformer=None, bucket = None, **load_data_kwargs):
         """Initialize base class.
 
         Parameters
@@ -23,6 +24,8 @@ class BaseDataLoader:
         """
         self.data_transformer = data_transformer
         self.load_data_kwargs = load_data_kwargs
+        self.s3 = boto3.client("s3")
+        self.bucket = bucket
 
     def load_data(self, data_path):
         """Load and transform the input data.
@@ -119,9 +122,10 @@ class CSVDataLoader(BaseDataLoader):
         y : DataFrame
             Data corresponding to target columns with index as patient ids.
         """
-        data = pd.read_csv(filepath_or_buffer=data_path, **self.load_data_kwargs)
-        if self.data_transformer is not None:
-            data = self.data_transformer.transform(data)
+        with self.s3.get_object(Bucket = self.bucket, Prefix = data_path) as file_obj : 
+            data = pd.read_csv(filepath_or_buffer=file_obj, **self.load_data_kwargs)
+            if self.data_transformer is not None:
+                data = self.data_transformer.transform(data)
         return data
 
 
