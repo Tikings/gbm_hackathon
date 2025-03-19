@@ -190,7 +190,7 @@ class SingleCellLoader:
             The anndata object.
         """
 
-        with self.s3.get_object(Bucket = self.bucket, Key = path_data)["Body"].read() as file_obj :
+        with self.s3.get_object(Bucket = self.bucket, Key = str(path_data))["Body"].read() as file_obj :
             adata = ad.read_h5ad(file_obj)
         return adata
 
