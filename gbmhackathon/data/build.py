@@ -26,7 +26,9 @@ from gbmhackathon.data.io.preprocessor_tabular import (
 )
 from gbmhackathon.definitions import (
     DATA_PATH_FILES_MOSAIC,
-    DATA_PATH_FILES_BRUCE
+    DATA_PATH_FILES_BRUCE,
+    MOSAIC_BUCKET,
+    BRUCE_BUCKET
 )
 
 
@@ -60,27 +62,34 @@ MosaicDataset = DataCenter(
             files={
                 "data dictionary": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Data dictionary"],
-                    loader=CSVDataLoader(),
+                    loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
+                        ),
                 ),
                 "original clinical": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Processed clinical"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICLightClinicalDataCleaner(),
                     ),
                 ),
                 "processed gbm clinical": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Processed clinical"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICClinicalDataCleaner(),
                     ),
                 ),
                 "treatments": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Treatments"],
-                    loader=CSVDataLoader(),
+                    loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
+                        ),
                 ),
                 "key events clinical": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Key events clinical"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICKeyEventsDataCleaner(),
                     ),
                 ),
@@ -91,24 +100,28 @@ MosaicDataset = DataCenter(
                 "raw counts": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Bulk RNA raw counts"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICBulkRNADataCleaner(), sep="\t"
                     ),
                 ),
                 "TPM counts": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Bulk RNA TPM counts"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICBulkRNADataCleaner(), sep="\t"
                     ),
                 ),
                 "normalized counts": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Bulk RNA normalized counts"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICBulkRNADataCleaner(), sep="\t"
                     ),
                 ),
                 "fpkm counts": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["Bulk RNA fpkm counts"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICBulkRNADataCleaner(), sep="\t"
                     ),
                 ),
@@ -135,24 +148,28 @@ MosaicDataset = DataCenter(
                 "WES CNV deletion": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["WES CNV deletion"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICWESDataCleaner(),
                     ),
                 ),
                 "WES CNV amplification": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["WES CNV amplification"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICWESDataCleaner(),
                     ),
                 ),
                 "WES CNV oncogenic": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["WES CNV oncogenic"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICWESDataCleaner(),
                     ),
                 ),
                 "WES mutations": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["WES mutations"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=MOSAICWESDataCleaner(),
                     ),
                 ),
@@ -187,6 +204,7 @@ BruceDataset = DataCenter(
                 "metadata": DataFile(
                     name=DATA_PATH_FILES_BRUCE["Metadata"],
                     loader=CSVDataLoader(
+                        bucket=MOSAIC_BUCKET,
                         data_transformer=BruceLightMetadataDataCleaner(),
                     ),
                 ),
