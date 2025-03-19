@@ -2,6 +2,7 @@
 
 import os
 
+import io
 import anndata as ad
 import pandas as pd
 import scanpy as sc
@@ -190,7 +191,7 @@ class SingleCellLoader:
             The anndata object.
         """
 
-        with self.s3.get_object(Bucket = self.bucket, Key = str(path_data))["Body"].read() as file_obj :
+        with io.BytesIO(self.s3.get_object(Bucket = self.bucket, Key = str(path_data))["Body"].read()) as file_obj :
             adata = ad.read_h5ad(file_obj)
         return adata
 
