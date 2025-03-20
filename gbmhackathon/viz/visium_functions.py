@@ -8,6 +8,7 @@ import scanpy as sc
 import tiffslide
 import pandas as pd
 import boto3
+import io
 
 
 from gbmhackathon.utils.visium_functions import convert_obsm_to_adata
@@ -115,6 +116,6 @@ def get_slide_img(slide_paths : pd.DataFrame, slide_idx : int, bucket : str = MO
 
     s3 = boto3.client("s3")
     slide_path = str(slide_paths["path"].iloc[slide_idx])
-    with s3.get_object(Bucket = bucket, Key = slide_path)["Body"].read() as file_obj:
+    with io.BytesIO(s3.get_object(Bucket = bucket, Key = slide_path)["Body"].read()) as file_obj:
         slide = tiffslide.TiffSlide(file_obj)
     return slide.get_thumbnail(slide.level_dimensions[-2])
