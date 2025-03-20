@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 import boto3
 import re
+from gbmhackathon.definitions import MOSAIC_BUCKET
+import s3fs
 
 MOSAIC_DATASET = "ABSTRA_DATASET_03bb30aa_16ed_4b89_913e_fe009db2aabd"
 BRUCE_DATESET = "ABSTRA_DATASET_8bfd41bf_a110_4748_bda1_8c225cdde6b5"
@@ -31,3 +33,23 @@ def list_bucket_files(bucket_name, prefix, pattern= "*" ):
     except Exception as e:
         print(f"Error : {e}")
         return []
+
+def ls_folder_bucket(folder : str, bucket= MOSAIC_BUCKET):
+    fs = s3fs.S3FileSystem()
+    s3_path = f"s3://{bucket}/{folder}/" if folder[-1] != "/" else f"s3://{bucket}/{folder}"
+    return [Path(folder).name for folder in fs.ls(s3_path)]
+
+def load_visium_folder(sample_id : str,
+                       s3_folder : str,
+                       local_path : str,
+                       bucket = MOSAIC_BUCKET,
+                       ):
+    try :
+        fs = s3fs.S3FileSystem()
+        s3_path = f"s3://{bucket}/{s3_folder}/{sample_id}/"
+        print(f"Copying S3 : {s3_path} to {local_path}")
+        _ = fs.get(s3_path, fs)
+        return (True, None)
+    except Exception as e :
+        print(f"Error to copy files : {e}")
+        return (False, e)
