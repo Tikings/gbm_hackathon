@@ -180,7 +180,7 @@ MosaicDataset = DataCenter(
                 "HE files": DataFile(
                     name=DATA_PATH_FILES_MOSAIC["HE"],
                     loader=PathsLoader(
-                        pattern_files="*.tif",
+                        pattern_files=".*\.tif",
                         data_transformer=MOSAICHEDataCleaner(),
                     ),
                 ),
