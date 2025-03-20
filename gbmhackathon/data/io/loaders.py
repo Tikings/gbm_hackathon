@@ -197,8 +197,12 @@ class SingleCellLoader:
             The anndata object.
         """
 
-        with io.BytesIO(self.s3.get_object(Bucket = self.bucket, Key = str(path_data))["Body"].read()) as file_obj :
+        buffer = io.BytesIO(self.s3.get_object(Bucket = self.bucket, Key = str(path_data))["Body"].read())
+        with buffer as file_obj :
             adata = ad.read_h5ad(file_obj)
+
+        del buffer
+
         return adata
 
 
