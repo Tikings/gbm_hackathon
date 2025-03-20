@@ -7,7 +7,7 @@ import anndata as ad
 import pandas as pd
 import scanpy as sc
 import boto3
-from s3_loader import list_bucket_files
+from gbmhackathon.s3_loader import list_bucket_files
 
 
 class BaseDataLoader:
