@@ -118,4 +118,4 @@ def get_slide_img(slide_paths : pd.DataFrame, slide_idx : int, bucket : str = MO
     slide_path = str(slide_paths["path"].iloc[slide_idx])
     with io.BytesIO(s3.get_object(Bucket = bucket, Key = slide_path)["Body"].read()) as file_obj:
         slide = tiffslide.TiffSlide(file_obj)
-    return slide.get_thumbnail(slide.level_dimensions[-2])
+        return slide.get_thumbnail(slide.level_dimensions[-2])
