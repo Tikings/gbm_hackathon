@@ -1,13 +1,14 @@
 """Module for loading data."""
 
 import os
+from pathlib import Path
 
 import io
 import anndata as ad
 import pandas as pd
 import scanpy as sc
 import boto3
-from gbmhackathon.s3_loader import list_bucket_files
+from gbmhackathon.s3_loader import list_bucket_files, load_visium_folder, ls_folder_bucket
 
 
 class BaseDataLoader:
@@ -206,6 +207,7 @@ class VisiumLoader:
         input_path,
         sample_list,
         resolution,
+        local_path = "/tmp/visium_data",
     ):
         """Load AnnData objects from a folder containing one folder per sample using scanpy.read_visium.
 
@@ -226,14 +228,24 @@ class VisiumLoader:
 
         anndata_dict = {}
 
+        all_samples = ls_folder_bucket(folder=str(input_path))
+
         # Get the list of samples to process
         samples_to_load = (
-            sample_list if sample_list is not None else os.listdir(input_path)
+            sample_list if sample_list is not None else all_samples
         )
 
         # Iterate over the specified samples
         for sample_id in samples_to_load:
-            sample_path = os.path.join(input_path, sample_id, "outs")
+            # sample_path = os.path.join(input_path, sample_id, "outs")
+            Ok, e_ = load_visium_folder(sample_id=sample_id,
+                                       s3_folder= input_path,
+                                       local_path = local_path)   
+            if Ok : 
+                sample_path = Path(f"{local_path}/outs")
+            else : 
+                print(f"Failed to load sample {sample_id} : {e_}")
+                continue
 
             if os.path.isdir(sample_path):
                 try:
@@ -259,5 +271,6 @@ class VisiumLoader:
                     print(f"Failed to load data for sample {sample_id}: {e}")
             else:
                 print(f"Sample directory not found: {sample_path}")
+            
 
         return anndata_dict
