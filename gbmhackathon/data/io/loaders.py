@@ -166,7 +166,7 @@ class PathsLoader(BaseDataLoader):
             Loaded and transformed data.
         """
         # paths = list(data_path.glob(self.pattern_files))
-        paths = list_bucket_files(bucket_name=self.bucket, pattern  = self.pattern_files)
+        paths = list_bucket_files(bucket_name=self.bucket, prefix=data_path,  pattern  = self.pattern_files)
         data = pd.DataFrame({"path": paths})
         if self.data_transformer is not None:
             data = self.data_transformer.transform(data)
