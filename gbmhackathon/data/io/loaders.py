@@ -7,6 +7,7 @@ import anndata as ad
 import pandas as pd
 import scanpy as sc
 import boto3
+from s3_loader import list_bucket_files
 
 
 class BaseDataLoader:
@@ -164,7 +165,8 @@ class PathsLoader(BaseDataLoader):
         data : DataFrame
             Loaded and transformed data.
         """
-        paths = list(data_path.glob(self.pattern_files))
+        # paths = list(data_path.glob(self.pattern_files))
+        paths = list_bucket_files(bucket_name=self.bucket, pattern  = self.pattern_files)
         data = pd.DataFrame({"path": paths})
         if self.data_transformer is not None:
             data = self.data_transformer.transform(data)
