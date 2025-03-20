@@ -13,7 +13,7 @@ def get_s3_dataset_info(dataset_name : str = MOSAIC_DATASET):
     s3_bucket, s3_folder = s3_link.split("/")[2], Path(s3_link.split("/")[3])
     return s3_bucket, s3_folder
 
-def lister_fichiers_s3(bucket_name, pattern= "*" ):
+def list_bucket_files(bucket_name, pattern= "*" ):
 
     s3 = boto3.client("s3")
     regex = re.compile(pattern)
