@@ -9,6 +9,7 @@ import pandas as pd
 import scanpy as sc
 import boto3
 from gbmhackathon.s3_loader import list_bucket_files, load_visium_folder, ls_folder_bucket
+from gbmhackathon.definitions import MOSAIC_BUCKET
 
 
 class BaseDataLoader:
@@ -208,6 +209,7 @@ class VisiumLoader:
         sample_list,
         resolution,
         local_path = "/tmp/visium_data",
+        bucket = MOSAIC_BUCKET,
     ):
         """Load AnnData objects from a folder containing one folder per sample using scanpy.read_visium.
 
@@ -228,7 +230,7 @@ class VisiumLoader:
 
         anndata_dict = {}
 
-        all_samples = ls_folder_bucket(folder=str(input_path))
+        all_samples = ls_folder_bucket(folder=str(input_path), bucket=bucket)
 
         # Get the list of samples to process
         samples_to_load = (
@@ -240,7 +242,8 @@ class VisiumLoader:
             # sample_path = os.path.join(input_path, sample_id, "outs")
             Ok, e_ = load_visium_folder(sample_id=sample_id,
                                        s3_folder= input_path,
-                                       local_path = local_path)   
+                                       local_path = local_path,
+                                       bucket=bucket)   
             if Ok : 
                 sample_path = Path(f"{local_path}/outs")
             else : 

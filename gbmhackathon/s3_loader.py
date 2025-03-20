@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 from pathlib import Path
 import boto3
 import re
-from gbmhackathon.definitions import MOSAIC_BUCKET
 import s3fs
 
 MOSAIC_DATASET = "ABSTRA_DATASET_03bb30aa_16ed_4b89_913e_fe009db2aabd"
@@ -34,7 +33,7 @@ def list_bucket_files(bucket_name, prefix, pattern= "*" ):
         print(f"Error : {e}")
         return []
 
-def ls_folder_bucket(folder : str, bucket= MOSAIC_BUCKET):
+def ls_folder_bucket(folder : str, bucket):
     fs = s3fs.S3FileSystem()
     s3_path = f"s3://{bucket}/{folder}/" if folder[-1] != "/" else f"s3://{bucket}/{folder}"
     return [Path(folder).name for folder in fs.ls(s3_path)]
@@ -42,7 +41,7 @@ def ls_folder_bucket(folder : str, bucket= MOSAIC_BUCKET):
 def load_visium_folder(sample_id : str,
                        s3_folder : str,
                        local_path : str,
-                       bucket = MOSAIC_BUCKET,
+                       bucket,
                        ):
     try :
         fs = s3fs.S3FileSystem()
