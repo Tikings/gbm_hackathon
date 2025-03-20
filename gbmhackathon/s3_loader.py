@@ -22,7 +22,7 @@ def list_bucket_files(bucket_name, prefix, pattern= "*" ):
         response = s3.list_objects_v2(Bucket=bucket_name, Prefix = str(prefix))
 
         if "Contents" in response:
-            fichiers = [obj["Key"] for obj in response["Contents"] if regex.match(obj["Key"])]
+            fichiers = [Path(obj["Key"]) for obj in response["Contents"] if regex.match(obj["Key"])]
             return fichiers
         else:
             # No file matching the pattern found
