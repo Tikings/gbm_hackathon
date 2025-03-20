@@ -8,6 +8,8 @@ import anndata as ad
 import pandas as pd
 import scanpy as sc
 import boto3
+import shutil
+
 from gbmhackathon.s3_loader import list_bucket_files, load_visium_folder, ls_folder_bucket
 from gbmhackathon.definitions import MOSAIC_BUCKET
 
@@ -274,6 +276,8 @@ class VisiumLoader:
                     print(f"Failed to load data for sample {sample_id}: {e}")
             else:
                 print(f"Sample directory not found: {sample_path}")
-            
+
+            # Remove the local folder
+            shutil.rmtree(sample_path)
 
         return anndata_dict
