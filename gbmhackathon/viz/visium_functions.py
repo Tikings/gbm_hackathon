@@ -5,8 +5,13 @@ from typing import Dict, List, Optional, Union
 
 import anndata as ad
 import scanpy as sc
+import tiffslide
+import pandas as pd
+import boto3
+
 
 from gbmhackathon.utils.visium_functions import convert_obsm_to_adata
+from gbmhackathon.definitions import MOSAIC_BUCKET
 
 
 def plot_spatial_expression(
@@ -105,3 +110,11 @@ def plot_obsm(
         )
     else:
         sc.pl.spatial(obsm_ad, color=features, show=show, **kwargs)
+
+def get_slide_img(slide_paths : pd.DataFrame, slide_idx : int, bucket : str = MOSAIC_BUCKET ) :
+
+    s3 = boto3.client("s3")
+    slide_path = str(slide_paths["path"].iloc[slide_idx])
+    with s3.get_object(Bucket = bucket, Prefix = slide_path)["Body"].read() as file_obj:
+        slide = tiffslide.TiffSlide(file_obj)
+    return slide.get_thumbnail(slide.level_dimensions[-2])
