@@ -47,7 +47,7 @@ def load_visium_folder(sample_id : str,
         fs = s3fs.S3FileSystem()
         s3_path = f"s3://{bucket}/{s3_folder}/{sample_id}/"
         print(f"Copying S3 : {s3_path} to {local_path}")
-        _ = fs.get(s3_path, fs)
+        fs.get(s3_path, local_path, recursive=True)
         return (True, None)
     except Exception as e :
         print(f"Error to copy files : {e}")
