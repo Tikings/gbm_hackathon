@@ -56,6 +56,7 @@ gget = "^0.29.0"
 tiffslide = "^2.4.0"
 tifffile = "^2025.1.10"
 ipytree = "*"
+boto3 = "^1.37.16"
 
 [tool.poetry.group.dev]
 optional = true
