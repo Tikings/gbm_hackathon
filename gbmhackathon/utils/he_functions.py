@@ -1,18 +1,14 @@
 import io
-import gc
-import tiffslide
 import pandas as pd
-import boto3
+import s3fs
 from gbmhackathon.definitions import MOSAIC_BUCKET
 
-def get_tiff_obj(
-    slide_paths: pd.DataFrame, slide_idx: int, bucket: str = MOSAIC_BUCKET
+def get_tif_bytes_io(
+    slide_path: pd.DataFrame, bucket: str = MOSAIC_BUCKET
 ):
-    s3 = boto3.client("s3")
-    slide_path = str(slide_paths["path"].iloc[slide_idx])
-    buffer = io.BytesIO(s3.get_object(Bucket=bucket, Key=slide_path)["Body"].read())
-    with buffer as file_obj:
-        slide = tiffslide.TiffSlide(file_obj)
-    del buffer
-    gc.collect()
-    return slide
+    s3 = s3fs.S3FileSystem()
+    s3_path = f"s3://{bucket}/{slide_path}"
+
+    with s3.open(s3_path, "rb") as file_obj :
+        bio = io.BytesIO(file_obj.read())
+    return bio
