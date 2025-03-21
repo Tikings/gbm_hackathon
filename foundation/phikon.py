@@ -53,7 +53,7 @@ def get_emb(slide : tiffslide.TiffSlide, processor:AutoImageProcessor, model : A
 
 
 
-def get_all_embeddings( dataframe : pd.DataFrame) -> dict : 
+def get_all_embeddings( dataframe : pd.DataFrame, device : str) -> dict : 
     """
     POUR PHIKON
     ___________
@@ -67,7 +67,7 @@ def get_all_embeddings( dataframe : pd.DataFrame) -> dict :
 
     """
     # Loading model
-    processor_phikon,phikon=setup_model()
+    processor_phikon,phikon=setup_model(device= device)
 
     # Formatting dataframe
     df = dataframe.reset_index(inplace=False)
@@ -105,6 +105,6 @@ def pipeline_phikon(device : str = "cpu", verbose : bool = False):
     if verbose :
         print("Processing embeddings...")
 
-    emb_dict = get_all_embeddings(dataframe)
+    emb_dict = get_all_embeddings(dataframe, device)
 
     return emb_dict
