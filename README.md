@@ -18,6 +18,7 @@ conda init bash && bash
 2. Created `.env` file to get the access keys of the data storage (DON'T ACTIVATE THE CONDA ENV !!)
 ```bash
 abstra mkenv --eval > .env
+export $(abstra mkenv --eval)
 ```
 
 3. Create the environment.
