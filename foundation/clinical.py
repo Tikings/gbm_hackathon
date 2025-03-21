@@ -147,7 +147,7 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
     
     num_features.remove("patient_id")
 
-    gbm_df.fillna("Unk", inplace=True)
+    # gbm_df.fillna("Unk", inplace=True)
     return gbm_df, cat_features, num_features, TARGETS
 
 
