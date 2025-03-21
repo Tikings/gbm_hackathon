@@ -1,12 +1,15 @@
 import os
+import pickle
 from dotenv import load_dotenv
 from pathlib import Path
 import boto3
 import re
 import s3fs
+import datetime
 
 MOSAIC_DATASET = "ABSTRA_DATASET_03bb30aa_16ed_4b89_913e_fe009db2aabd"
 BRUCE_DATESET = "ABSTRA_DATASET_8bfd41bf_a110_4748_bda1_8c225cdde6b5"
+PROJECT_STORAGE = "ABSTRA_PROJECT_STORAGE_BUCKET"
 
 def get_s3_dataset_info(dataset_name : str = MOSAIC_DATASET):
     load_dotenv()
@@ -52,3 +55,25 @@ def load_visium_folder(sample_id : str,
     except Exception as e :
         print(f"Error to copy files : {e}")
         return (False, e)
+
+def write_s3(obj, save_name : str, folder : str, bucket_name = PROJECT_STORAGE):
+    try : 
+        s3_bucket , s3_folder = get_s3_dataset_info(bucket_name)
+        date = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        save_name = f"{folder}/{date}_{save_name}.pkl"
+        path = f"s3://{s3_bucket}/{s3_folder}/{save_name}"
+        fs = s3fs.S3FileSystem()
+        with fs.open(path=path, mode = "wb") as f : 
+            pickle.dump(obj, f)
+        print(f"Object saved at {path}")
+    except Exception as e :
+        print(f"Failed to save object : {e}")
+    
+def load_s3(s3_path : str) :
+    try : 
+        fs = s3fs.S3FileSystem()
+        with fs.open(s3_path, "rb") as f :
+            obj = pickle.load(fs)
+        return obj
+    except Exception as e :
+        print(f"Error to load {s3_path} : {e}")
