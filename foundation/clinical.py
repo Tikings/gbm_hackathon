@@ -144,6 +144,8 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
         col for col in gbm_df.columns if col not in cat_features + not_features
     ]
     num_features.remove("corrected_patient_id")
+    
+    num_features.remove("patient_id")
 
     gbm_df.fillna("Unk", inplace=True)
     return gbm_df, cat_features, num_features, TARGETS
