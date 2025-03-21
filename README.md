@@ -15,9 +15,9 @@ Data loading API and data visualization of GBM Hackathon data.
 conda init bash && bash
 ```
 
-2. Change the default conda environment location. This ensures it is not necessary to reinstall the environment each time you restart a Notebook instance. This command needs to be rerun each time you restart the instance.
+2. Created `.env` file to get the access keys of the data storage (DON'T ACTIVATE THE CONDA ENV !!)
 ```bash
-conda config --append envs_dirs /home/ec2-user/SageMaker/.conda/envs
+abstra mkenv --eval > .env
 ```
 
 3. Create the environment.
@@ -37,7 +37,7 @@ git clone https://github.com/owkin/gbm_hackathon.git
 cd gbm_hackathon
 make install-poetry
 make install-all
-pre-commit install
+pip install -ry requirements_foundation.txt
 ```
 
 Note that this also makes your environment visible in Jupyter.
