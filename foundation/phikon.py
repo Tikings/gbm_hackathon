@@ -1,4 +1,5 @@
 import torch 
+import gc
 from tqdm import tqdm
 import tiffslide
 from transformers import AutoImageProcessor, AutoModel
@@ -85,6 +86,9 @@ def get_all_embeddings( dataframe : pd.DataFrame) -> dict :
 
             # Computing embedding
             embedding=get_emb(slide,processor=processor_phikon,model=phikon)
+            
+            del bio 
+            gc.collect()
 
             emb_dict[subject_id]=embedding
 
