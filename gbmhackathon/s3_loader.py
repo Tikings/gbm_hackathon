@@ -5,7 +5,7 @@ from pathlib import Path
 import boto3
 import re
 import s3fs
-import datetime
+from datetime import datetime
 
 MOSAIC_DATASET = "ABSTRA_DATASET_03bb30aa_16ed_4b89_913e_fe009db2aabd"
 BRUCE_DATESET = "ABSTRA_DATASET_8bfd41bf_a110_4748_bda1_8c225cdde6b5"
