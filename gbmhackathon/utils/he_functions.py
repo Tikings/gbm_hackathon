@@ -5,7 +5,7 @@ import pandas as pd
 import boto3
 from gbmhackathon.definitions import MOSAIC_BUCKET
 
-def get_slide_img(
+def get_tiff_path(
     slide_paths: pd.DataFrame, slide_idx: int, bucket: str = MOSAIC_BUCKET
 ):
     s3 = boto3.client("s3")
