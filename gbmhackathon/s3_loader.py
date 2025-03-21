@@ -73,7 +73,7 @@ def load_s3(s3_path : str) :
     try : 
         fs = s3fs.S3FileSystem()
         with fs.open(s3_path, "rb") as f :
-            obj = pickle.load(fs)
+            obj = pickle.load(f)
         return obj
     except Exception as e :
         print(f"Error to load {s3_path} : {e}")
