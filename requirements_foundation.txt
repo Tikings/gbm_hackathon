@@ -1,2 +1,5 @@
 novae
-
+s3fs
+dotenv
+prince
+torch
