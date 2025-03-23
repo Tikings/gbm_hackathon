@@ -87,7 +87,7 @@ def get_emb(patient : str,
 
 
 def get_all_embeddings(dict_annData : Dict[str, ad.AnnData],
-                       model : novae.model.Novea) -> Dict[str, torch.Tensor]:
+                       model : novae.model.Novae) -> Dict[str, torch.Tensor]:
     """Compute all the representations of the data
 
     Args:
