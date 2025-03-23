@@ -125,7 +125,7 @@ def pipeline_novae(patient: List[str] = None,
                    resolution = "hires",
                    radius_spatial_neighbors : int = 300,
                    target_sum : int = 1e6,
-                   model_type = "MISC-Lab/novae-human-0",
+                   model_type = "MICS-Lab/novae-human-0",
                    ) -> Dict[str, torch.Tensor]:
 
     #Getting all the data
