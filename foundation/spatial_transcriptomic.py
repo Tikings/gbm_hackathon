@@ -65,7 +65,7 @@ def setup_novae(model_type = "MISC-Lab/novae-human-0") -> novae.model.Novae :
         novae.model.Novae: Foundation model
     """
     ### Loading the model from HF
-    return novae.model.from_pretrained(model_type)
+    return novae.Novae.from_pretrained(model_type)
 
 def get_emb(patient : str,
             dict_annData : Dict[str, ad.AnnData],
