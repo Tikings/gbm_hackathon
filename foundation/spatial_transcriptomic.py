@@ -15,6 +15,10 @@ import anndata as ad
 from gbmhackathon.utils.visium_functions import normalize_anndata_wrapper
 from gbmhackathon import MosaicDataset
 
+import warnings
+warnings.filterwarnings("ignore", module="anndata")
+
+
 
 ##################################################
 ############# Chargement des données #############
