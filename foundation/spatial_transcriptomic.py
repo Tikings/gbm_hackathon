@@ -45,7 +45,7 @@ def get_data(patient: List[str] = None,
     norm_data = normalize_anndata_wrapper(data, target_sum = target_sum)
 
     ## Computing the spatial neighbors for further analysis
-    list_patient, list_annData = norm_data.items()
+    list_patient, list_annData = list(norm_data.keys()), list(norm_data.values())
     novae.utils.spatial_neighbors(list_annData, radius=radius_spatial_neighbors, technology ="visium")
 
     return dict(zip(list_patient, list_annData))
