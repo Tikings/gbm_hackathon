@@ -141,21 +141,21 @@ def pipeline_novae(patient: List[str] = None,
 ############## Save data ##################
 ###########################################
 
-def save_novae(saving_folder : Path,
-               dict_emb : Dict[str,torch.Tensor],
-               name : str) -> None :
-    """To save the embeddings
+# def save_novae(saving_folder : Path,
+#                dict_emb : Dict[str,torch.Tensor],
+#                name : str) -> None :
+#     """To save the embeddings
 
-    Args:
-        saving_folder (Path): Path of the folder in which to save the data
-        dict_emb (Dict[str,torch.Tensor]): Dict of the embeddings
-        name (str): name of the file
-    """
+#     Args:
+#         saving_folder (Path): Path of the folder in which to save the data
+#         dict_emb (Dict[str,torch.Tensor]): Dict of the embeddings
+#         name (str): name of the file
+#     """
 
-    # Getting the date
-    date = dict_emb["settings"]["date"]
+#     # Getting the date
+#     date = dict_emb["settings"]["date"]
 
-    # Saving the model
-    with open(saving_folder / f"{name}_{date}.pkl", "wb") as f:
-        pkl.dump(dict_emb, f)
-    print(f"Model saved at {saving_folder / f"{name}_{date}.pkl"}")
+#     # Saving the model
+#     with open(saving_folder / f"{name}_{date}.pkl", "wb") as f:
+#         pkl.dump(dict_emb, f)
+#     print(f"Model saved at {saving_folder / f"{name}_{date}.pkl"}")
