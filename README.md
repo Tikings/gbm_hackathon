@@ -27,17 +27,15 @@ conda create -n gbmhackathon -y python=3.10
 conda activate gbmhackathon
 ```
 
-4. Optional, fork the repository
-If you aim to share your code with your team members, consider doing
-a fork or create a copy of the actual repository with a new name.
-
-5. Clone the repository and install the dependencies.
+4. Clone the repository and install the dependencies.
 ```bash
 git clone https://github.com/owkin/gbm_hackathon.git
 cd gbm_hackathon
-make install-poetry
-make install-all
-pip install -r requirements_foundation.txt
+```
+
+5. Install dependencies
+```bash
+bash setup_repo.sh
 ```
 
 Note that this also makes your environment visible in Jupyter.
