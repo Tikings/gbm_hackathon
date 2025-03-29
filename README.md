@@ -33,12 +33,11 @@ a fork or create a copy of the actual repository with a new name.
 
 5. Clone the repository and install the dependencies.
 ```bash
-cd /home/ec2-user/SageMaker
 git clone https://github.com/owkin/gbm_hackathon.git
 cd gbm_hackathon
 make install-poetry
 make install-all
-pip install -ry requirements_foundation.txt
+pip install -r requirements_foundation.txt
 ```
 
 Note that this also makes your environment visible in Jupyter.
