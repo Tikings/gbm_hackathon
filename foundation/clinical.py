@@ -158,7 +158,7 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
 
 
 def pipeline_clinical(
-    verbose: bool = False, save: bool = False, save_path: str = "clinical_data.pt"
+    n_components : int = 10, verbose: bool = False, save: bool = False, save_path: str = "clinical_data.pt"
 ) -> Dict[str, Union[Dict, Dict[str, torch.Tensor]]]:
     """
     Process clinical data, compute embeddings, and save the output.
@@ -169,6 +169,7 @@ def pipeline_clinical(
         - "dataset": Additional metadata including id2row mapping, feature names, target names, and full tensors for features (X) and targets (Y).
 
     Args:
+        n_components: Number of components to keep for Multi Component Analysis.
         verbose: If True, prints progress messages.
         save: If True, saves the output to the specified path.
         save_path: File path to save the processed data.
@@ -202,11 +203,18 @@ def pipeline_clinical(
 
     if verbose:
         print("Multi Component Analysis..")
-    mca = prince.MCA(n_components=10, random_state=6262)
+    mca = prince.MCA(n_components=n_components, random_state=6262)
     mca_gbm_df = mca.fit_transform(cat_gbm_df.astype("category"))
 
+    if verbose:
+        print("Retrieving column contributions..")
+    cat_col_contributions = mca.column_contributions_
+    cat_col_contributions["feature"] = ['_'.join(mod.split('_')[:-1])[:-1] for mod in list(cat_col_contributions.index)]
+    
+    mca_gbm_df.columns = [f'C{i}' for i in range(mca_gbm_df.shape[1])]
+    
     complete_df = norm_num_gbm_df.join(mca_gbm_df)
-
+    
     if verbose:
         print("Imputing targets..")
     # Replace NAs in target
@@ -227,8 +235,11 @@ def pipeline_clinical(
     id2row = {patient_id: i for i, patient_id in enumerate(gbm_df.index)}
     dataset = {
         "id2row": id2row,
-        "features": cat_features + num_features,
+        "cat_features": cat_features,
+        "num_features": num_features,
+        "features": list(complete_df.columns),
         "targets": targets,
+        'mca_contributions':cat_col_contributions,
         "X": torch.tensor(complete_df.values),
         "Y": torch.tensor(norm_target_df.values),
         "imputed_Y": torch.tensor(imputed_targets.values),
