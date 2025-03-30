@@ -42,7 +42,7 @@ from gbmhackathon import BruceDataset, MosaicDataset
 
 # Custom imports
 from sklearn.preprocessing import StandardScaler
-from sklearn.impute import KNNImputer
+from sklearn.impute import KNNImputer, SimpleImputer
 import prince
 import torch
 import datetime
@@ -106,7 +106,12 @@ def load_data(
         data = torch.load(data)
     return data
 
-
+def impute_col(col):
+    if any(t in str(col.dtype) for t in ['int', 'float']):
+        return col.fillna(-1)
+    else:
+        return col.fillna("Unk")
+        
 def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
     """
     Prepare clinical data by handling inconsistencies, defining features, and imputing missing values.
@@ -138,16 +143,17 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
         "sample_origin",
         "tumour_resection_chronology",
     ]
-    cat_features = [col for col in cat_features if col not in not_features]
+    cat_features = [col for col in cat_features if col not in not_features + TARGETS]
 
     num_features = [
-        col for col in gbm_df.columns if col not in cat_features + not_features
+        col for col in gbm_df.columns if col not in cat_features + not_features + TARGETS
     ]
     num_features.remove("corrected_patient_id")
     
     num_features.remove("patient_id")
 
-    # gbm_df.fillna("Unk", inplace=True)
+    # Replace categorical NAs with a new modality: -1 for numeric ordinal features and "Unk" for string categorical
+    gbm_df[cat_features] = gbm_df[cat_features].apply(impute_col, axis=0)
     return gbm_df, cat_features, num_features, TARGETS
 
 
@@ -178,10 +184,15 @@ def pipeline_clinical(
     num_gbm_df = gbm_df[num_features]
     target_df = gbm_df[targets]
 
+    if verbose:
+        print("Imputing numerical features...")
     knn = KNNImputer()
     imputed_num_gbm_df = pd.DataFrame(
         knn.fit_transform(num_gbm_df), columns=num_features, index=num_gbm_df.index
     )
+
+    if verbose:
+        print("Scaling numerical features...")
     scaler = StandardScaler()
     norm_num_gbm_df = pd.DataFrame(
         scaler.fit_transform(imputed_num_gbm_df),
@@ -189,10 +200,29 @@ def pipeline_clinical(
         index=num_gbm_df.index,
     )
 
+    if verbose:
+        print("Multi Component Analysis..")
     mca = prince.MCA(n_components=10, random_state=6262)
     mca_gbm_df = mca.fit_transform(cat_gbm_df.astype("category"))
 
     complete_df = norm_num_gbm_df.join(mca_gbm_df)
+
+    if verbose:
+        print("Imputing targets..")
+    # Replace NAs in target
+    imputed_targets = pd.DataFrame(
+        knn.fit_transform(target_df), columns=targets, index=target_df.index
+    )
+
+    if verbose:
+        print("Scaling targets..")
+    # Normalize targets
+    norm_target_df = pd.DataFrame(
+        scaler.fit_transform(imputed_targets[[col for col in targets if col != "recurrent_sample"]]),
+        columns=[col for col in targets if col != "recurrent_sample"],
+        index=target_df.index,
+    )
+    norm_target_df = pd.concat([norm_target_df, imputed_targets[["recurrent_sample"]]], axis=1)
 
     id2row = {patient_id: i for i, patient_id in enumerate(gbm_df.index)}
     dataset = {
@@ -200,7 +230,9 @@ def pipeline_clinical(
         "features": cat_features + num_features,
         "targets": targets,
         "X": torch.tensor(complete_df.values),
-        "Y": torch.tensor(target_df.values),
+        "Y": torch.tensor(norm_target_df.values),
+        "imputed_Y": torch.tensor(imputed_targets.values),
+        "original_Y": torch.tensor(target_df.values),
     }
 
     settings = {
@@ -217,6 +249,8 @@ def pipeline_clinical(
     output = {"settings": settings, "data": data, "dataset": dataset}
 
     if save:
+        if verbose:
+            print(f"Saving data at {save_path}..")
         torch.save(output, save_path)
     return output
 
