@@ -158,7 +158,7 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
 
 
 def pipeline_clinical(
-    n_components : int = 10, verbose: bool = False, save: bool = False, save_path: str = "clinical_data.pt"
+    mca: bool = False, n_components : int = 10, verbose: bool = False, save: bool = False, save_path: str = "clinical_data.pt"
 ) -> Dict[str, Union[Dict, Dict[str, torch.Tensor]]]:
     """
     Process clinical data, compute embeddings, and save the output.
@@ -169,6 +169,7 @@ def pipeline_clinical(
         - "dataset": Additional metadata including id2row mapping, feature names, target names, and full tensors for features (X) and targets (Y).
 
     Args:
+        mca: Use Multi Component Analysis or not.
         n_components: Number of components to keep for Multi Component Analysis.
         verbose: If True, prints progress messages.
         save: If True, saves the output to the specified path.
@@ -201,10 +202,11 @@ def pipeline_clinical(
         index=num_gbm_df.index,
     )
 
-    if verbose:
-        print("Multi Component Analysis..")
-    mca = prince.MCA(n_components=n_components, random_state=6262)
-    mca_gbm_df = mca.fit_transform(cat_gbm_df.astype("category"))
+    if mca:
+        if verbose:
+            print("Multi Component Analysis..")
+        mca = prince.MCA(n_components=n_components, random_state=6262)
+        mca_gbm_df = mca.fit_transform(cat_gbm_df.astype("category"))
 
     if verbose:
         print("Retrieving column contributions..")
