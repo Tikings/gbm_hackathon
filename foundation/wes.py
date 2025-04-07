@@ -32,7 +32,7 @@ def retrieve_useful_cols(df):
     return list(set(query[query > 0].index))
 
 def get_data() -> Dict:
-    """Load and return the clinical dataset using MosaicDataset."""
+    """Load and return the WES dataset using MosaicDataset."""
     source_dict_mosaic = MosaicDataset.load_tabular()
     return source_dict_mosaic["wes"]
     
@@ -107,10 +107,10 @@ def load_data(
     data: Optional[Union[str, Dict[str, torch.Tensor]]],
 ) -> Dict[str, torch.Tensor]:
     """
-    Load preprocessed clinical data from a saved file or dictionary.
+    Load preprocessed WES data from a saved file or dictionary.
 
     Args:
-        data: File path or preloaded dictionary (should be the output of pipeline_clinical).
+        data: File path or preloaded dictionary (should be the output of pipeline_WES).
 
     Returns:
         Dictionary containing processed data tensors with keys:
@@ -120,10 +120,10 @@ def load_data(
     """
     if data is None:
         try:
-            data = torch.load("clinical_data.pt")
+            data = torch.load("WES_data.pt")
         except FileNotFoundError:
             raise FileNotFoundError(
-                "No data provided and loading clinical_data.pt failed."
+                "No data provided and loading WES_data.pt failed."
             )
     elif isinstance(data, str):
         data = torch.load(data)
@@ -163,13 +163,13 @@ def get_emb(
     patient_id: str, data: Optional[Union[str, Dict[str, torch.Tensor]]] = None
 ) -> torch.Tensor:
     """
-    Retrieve the clinical embedding for a specific patient.
+    Retrieve the WES embedding for a specific patient.
 
-    Requires `pipeline_clinical` to have been run first.
+    Requires `pipeline_WES` to have been run first.
 
     Args:
         patient_id: The patient identifier (e.g., "HK_G_***").
-        data: Preprocessed data dictionary or file path to the saved output from pipeline_clinical.
+        data: Preprocessed data dictionary or file path to the saved output from pipeline_WES.
 
     Returns:
         Torch tensor representing the embedding for the specified patient.
@@ -182,13 +182,13 @@ def get_batch(
     patient_ids: list, data: Optional[Union[str, Dict[str, torch.Tensor]]] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Retrieve clinical embeddings and corresponding targets for a batch of patients.
+    Retrieve WES embeddings and corresponding targets for a batch of patients.
 
-    Requires `pipeline_clinical` to have been run first.
+    Requires `pipeline_WES` to have been run first.
 
     Args:
         patient_ids: List of patient identifiers.
-        data: Preprocessed data dictionary or file path to the saved output from pipeline_clinical.
+        data: Preprocessed data dictionary or file path to the saved output from pipeline_WES.
 
     Returns:
         Tuple containing:
@@ -216,10 +216,10 @@ def get_all_embeddings(
     """
     Retrieve all patient embeddings.
 
-    Requires `pipeline_clinical` to have been run first.
+    Requires `pipeline_WES` to have been run first.
 
     Args:
-        data: Preprocessed data dictionary or file path to the saved output from pipeline_clinical.
+        data: Preprocessed data dictionary or file path to the saved output from pipeline_WES.
         format: Output format. Options:
             - "dict": Returns a dictionary mapping patient IDs to their embeddings.
             - "tensor": Returns a single torch tensor of shape (num_patients, num_features).
