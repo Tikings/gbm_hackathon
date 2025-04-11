@@ -1,0 +1,22 @@
+
+
+
+{
+    
+    "model" : {
+              "conv_size" : 34
+                },
+
+    "training" : {
+        "epoch" : 10,
+        "batch_size" : 65
+
+                 },
+
+    "MLFlow" : {"experiment_name" : "test_1",
+                "run_name" : "run1"
+                }
+        
+
+
+}
