@@ -55,7 +55,7 @@ def check_types_list(input_list: List, type_str: str):
     input_list_types = iterable_types(input_list)
 
     assert np.all(check_func(input_list_types, check_isin_item, "int")) == True, (
-        f"All elements in layers argument must be integers. At least some were not: {layers} -> {layer_types}"
+        f"All elements in layers argument must be integers. At least some were not: {input_list} -> {input_list_types}"
     )
 
 
@@ -64,7 +64,7 @@ class MLP(nn.Module):
         self,
         layers: List[int],
         dropout: List[float] | float,
-        act_fn: List[Callable] | Callable,
+        act_fn: List[Callable | None] | Callable | None,
         norm_layer: List[Callable | None] | Callable | None,
     ):
         super().__init__()
@@ -89,29 +89,41 @@ class MLP(nn.Module):
                 ):  # If we are on the output layer, prevent dropout
                     # Adding dropout
                     if isinstance(dropout, list):
-                        if dropout[i] != 0:
-                            module_list.append(nn.Dropout(dropout[i]))
+                        if dropout[i - 1] != 0:
+                            module_list.append(nn.Dropout(dropout[i - 1]))
                     else:
                         if dropout != 0:
                             module_list.append(nn.Dropout(dropout))
 
                 # Adding Activation Function
                 if isinstance(act_fn, list):
-                    module_list.append(act_fn[i]())
+                    if act_fn[i - 1] is not None:
+                        module_list.append(act_fn[i - 1]())
                 else:
-                    module_list.append(act_fn())
+                    if act_fn is not None:
+                        module_list.append(act_fn())
 
-                if i < len(norm_layer):
-                    # Adding Normalization Layer
-                    if isinstance(norm_layer, list):
-                        if norm_layer[i] is not None:
-                            module_list.append(norm_layer[i](layer_size))
-                    else:
-                        if norm_layer is not None:
-                            module_list.append(norm_layer(layer_size))
+                # Adding Normalization Layer
+                if isinstance(norm_layer, list):
+                    if norm_layer[i - 1] is not None:
+                        module_list.append(norm_layer[i - 1](layer_size))
+                else:
+                    if norm_layer is not None:
+                        module_list.append(norm_layer(layer_size))
+
+        self.network = module_list
+
+        # weights and biases are initialized vy defaults, using appropriate initialize methods.
+        # That's why we dont manually do it
+
+    def forward(self, x):
+        return self.network(x)
 
     def validate_params(self):
         # Integrity of the argument 'layers'
+        assert len(self.layers_arg) > 1, (
+            f"Not enough layers in layers argument, must be at least of length 2: {self.layers_arg}"
+        )
         assert isinstance(self.layers_arg, list), (
             f"layers argument must be a List (of integers): {type(self.layers_arg)}"
         )
@@ -126,28 +138,71 @@ class MLP(nn.Module):
         if isinstance(self.dropout_arg, list):
             check_types_list(self.layers_arg, "float")
 
-            assert len(self.dropout_arg) >= len(layers_arg)
+            # when we define a dropout for output layer (-1 for input size) (it will be skipped during instantiation)
+            # Appropriate definition (-1 for input size, -1 for output size)
+            assert (
+                len(self.dropout_arg) == len(self.layers_arg) - 1
+                or len(self.dropout_arg) == len(self.layers_arg) - 2
+            ), (
+                f"Wrong dropout list length must be either len(layers) - 1 ({len(self.layers_arg) - 1}) or len(layers) - 2 ({len(self.layers_arg) - 2}) but found {len(self.dropout_arg)}"
+            )
         # Integrity of the argument 'act_fn'
-        assert isinstance(self.act_fn_arg, list) or callable(self.act_fn_arg), (
+        assert (
+            isinstance(self.act_fn_arg, list)
+            or callable(self.act_fn_arg)
+            or self.act_fn_arg is None
+        ), (
             f"act_fn argument must be either a List or callable: {self.act_fn_arg}, {type(self.act_fn_arg)}"
         )
         if isinstance(self.act_fn_arg, list):
-            check_func(self.act_fn_arg, check_callable_item)
+            check_func(self.act_fn_arg, check_callable_item, allow_none=True)
 
+            # -1: when we define a act_fn for output layer (-1 for input size) (it will be skipped during instantiation)
+            assert len(self.act_fn_arg) == len(self.layers_arg) - 1, (
+                f"Wrong act_fn list length must be len(layers) - 1 ({len(self.layers_arg) - 1}) but found {len(self.act_fn_arg)}"
+            )
         # Integrity of the argument 'norm_layers'
-        assert isinstance(self.norm_layer_arg, list) or callable(self.norm_layer_arg), (
-            f"act_fn argument must be either a List or callable: {self.norm_layer_arg}, {type(self.norm_layer_arg)}"
+        assert (
+            isinstance(self.norm_layer_arg, list)
+            or callable(self.norm_layer_arg)
+            or self.norm_layer_arg is None
+        ), (
+            f"norm_layer argument must be either a List, callable or None: {self.norm_layer_arg}, {type(self.norm_layer_arg)}"
         )
         if isinstance(self.norm_layer_arg, list):
             check_func(self.norm_layer_arg, check_callable_item, allow_none=True)
 
+            # -1: when we define a norm_layer for output layer (-1 for input size) (it will be skipped during instantiation)
+            assert len(self.norm_layer_arg) == len(self.layers_arg) - 1, (
+                f"Wrong norm_layer list length must be len(layers) - 1 ({len(self.layers_arg) - 1}) but found {len(self.norm_layer_arg)}"
+            )
 
-# class ModalityEncoder(nn.Module):
-#     def __init__(self, layers: List[int], dropout: List[float] | float):
+
+class ModalityEncoder(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+    ):
+        super().__init__()
+        layers = [input_size] + [128, 72, 64]
+        dropout = 0.5
+        act_fn = nn.ReLU
+        norm_layer = nn.RMSNorm
+        self.mlp = MLP(layers, dropout, act_fn, norm_layer)
+
+    def forward(self, x):
+        return self.mlp(x)
+
+
 class HnEEncoder(nn.Module):
     """Encoder for HnE data"""
 
-    pass
+    def __init__(self, input_size: int):
+        super().__init__()
+        self.encoder = ModalityEncoder(input_size)
+
+    def forward(self, x):
+        return self.encoder(x)
 
 
 class SpatialEncoder(nn.Module):
