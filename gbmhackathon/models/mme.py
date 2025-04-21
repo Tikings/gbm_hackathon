@@ -51,6 +51,7 @@ def check_func(iterable: Iterable, func: Callable, *args, **kwargs):
 
 
 def check_types_list(input_list: List, type_str: str):
+    """Verifies that each element in the list is of the correct type"""
     input_list = correct_float_int(input_list)
     input_list_types = iterable_types(input_list)
 
@@ -60,6 +61,8 @@ def check_types_list(input_list: List, type_str: str):
 
 
 class MLP(nn.Module):
+    """Multi Layer Perceptron with dropout and normalizaiton layers that can be instantiated dynamically"""
+
     def __init__(
         self,
         layers: List[int],
@@ -120,6 +123,7 @@ class MLP(nn.Module):
         return self.network(x)
 
     def validate_params(self):
+        """Checks the validity of the MLP init parameters"""
         # Integrity of the argument 'layers'
         assert len(self.layers_arg) > 1, (
             f"Not enough layers in layers argument, must be at least of length 2: {self.layers_arg}"
@@ -179,6 +183,8 @@ class MLP(nn.Module):
 
 
 class ModalityEncoder(nn.Module):
+    """Defines a unified architecture for all Encoders."""
+
     def __init__(
         self,
         input_size: int,
