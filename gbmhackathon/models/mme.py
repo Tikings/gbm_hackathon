@@ -2,7 +2,9 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from typing import List, Callable, Iterable, Any
+from typing import List, Dict, Callable, Iterable, Any
+
+from gbmhackathon.utils.module_functions import instantiate
 
 
 def correct_float_int(layer_list: List):
@@ -183,65 +185,70 @@ class MLP(nn.Module):
 
 
 class ModalityEncoder(nn.Module):
-    """Defines a unified architecture for all Encoders."""
+    """Defines a unified module for all Encoders."""
 
     def __init__(
         self,
-        input_size: int,
+        layers: List[int],
+        dropout: List[float] | float,
+        act_fn: List[Callable | None] | Callable | None,
+        norm_layer: List[Callable | None] | Callable | None,
     ):
         super().__init__()
-        layers = [input_size] + [128, 72, 64]
-        dropout = 0.5
-        act_fn = nn.ReLU
-        norm_layer = nn.RMSNorm
         self.mlp = MLP(layers, dropout, act_fn, norm_layer)
 
     def forward(self, x):
         return self.mlp(x)
 
 
-class HnEEncoder(nn.Module):
-    """Encoder for HnE data"""
-
-    def __init__(self, input_size: int):
-        super().__init__()
-        self.encoder = ModalityEncoder(input_size)
-
-    def forward(self, x):
-        return self.encoder(x)
-
-
-class SpatialEncoder(nn.Module):
-    """Encoder for Spatial transcriptmic data"""
-
-    pass
-
-
-class BulkEncoder(nn.Module):
-    """Encoder for BulkRNAseq data"""
-
-    pass
-
-
-class SingleCellEncoder(nn.Module):
-    """Encoder for scRNAseq data"""
-
-    pass
-
-
-class WESEncoder(nn.Module):
-    """Encoder for Whole Exome Sequencing data"""
-
-    pass
-
-
-class ClinicalEncoder(nn.Module):
-    """Encoder for Clinical data"""
-
-    pass
-
-
+@torch.jit.script  # For parallel processing
 class MultiModalEncoder(nn.Module):
     """Global encoder that encompasses all 6 modalities"""
 
-    pass
+    def __init__(
+        self,
+        hne_cfg: Dict,
+        spatial_cfg: Dict,
+        sc_cfg: Dict,
+        bulk_cfg: Dict,
+        wes_cfg: Dict,
+        clinical_cfg: Dict,
+    ):
+        super().__init__()
+        # Store configs
+        self.hne_cfg = hne_cfg
+        self.spatial_cfg = spatial_cfg
+        self.sc_cfg = sc_cfg
+        self.bulk_cfg = bulk_cfg
+        self.wes_cfg = wes_cfg
+        self.clinical_cfg = clinical_cfg
+
+        # Instantiate architecture
+        self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
+        self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
+        self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
+        self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
+        self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
+        self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
+
+        self.modality_net_map = {
+            "hne": self.hne_net,
+            "spatial": self.spatial_net,
+            "bulk": self.bulk_net,
+            "scRNA": self.sc_net,
+            "clinical": self.clinical_net,
+            "wes": self.wes_net,
+        }
+
+    def forward(self, x: Dict[str, torch.Tensor]):
+        futures_list = []
+        for key in self.modality_net_map.keys():
+            modality_tensor = x[key]
+            futures_list.append(
+                torch.jit.fork(self.modality_net_map[key], modality_tensor)
+            )
+
+        return {
+            key: torch.jit.wait(future)
+            for key, future in zip(self.modality_net_map.keys(), futures_list)
+        }
