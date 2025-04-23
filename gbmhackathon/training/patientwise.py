@@ -82,4 +82,4 @@ class PatientLearningDataset(Dataset):
             else :
                 dict_patient[key] = torch.zeros(self.size_emb[key])
                 list_available.append(0)
-        return patient, dict_patient, torch.Tensor(list_available)
+        return patient, dict_patient, torch.Tensor(list_available).to(torch.int8)
