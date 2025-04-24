@@ -86,6 +86,7 @@ class PatientLearningDataset(Dataset):
 
 def collate_patient_wise(batch): 
     list_patient = [patient[0] for patient in batch]
+    print(list_patient)
     list_dict_tensor = [patient[1] for patient in batch]
     modalities = list(list_dict_tensor[0].keys())
     # The order of the rows are the same as those of the dictionnary with the embeddings
