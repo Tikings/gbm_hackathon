@@ -91,7 +91,17 @@ def collate_patient_wise(batch):
     # The order of the rows are the same as those of the dictionnary with the embeddings
     list_available = [patient[2] for patient in batch]
     dict_batched = {}
-    for mod in modalities :
+    for mod in modalities:
+        mod_list = []
+        # BEFORE, wrong logic to batch modality embeddings across patient
+        # for dic in list_dict_tensor:
+        #     print(dic)
+        #     dict_batched[mod] = torch.stack([dic[mod] for _ in dic.keys()])
+
+        # AFTER
         for dic in list_dict_tensor:
-            dict_batched[mod] = torch.stack([dic[mod] for _ in dic.keys()])
-    return list_patient, modalities, dict_batched, list_available
+            mod_list.append(dic[mod])
+        dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
+    print(dict_batched["wes"].size())
+    available_mod_tensor = torch.stack(list_available).type(torch.float32)
+    return list_patient, modalities, dict_batched, available_mod_tensor

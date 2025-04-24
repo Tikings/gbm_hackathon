@@ -49,7 +49,7 @@ class InfoNCELoss(nn.Module):
     It computes contrastive loss between modalities from the same patient (positives) vs. different patients (negatives).
     """
 
-    def __init__(self, temperature: float = 0.1, use_all_positives: bool = True):
+    def __init__(self, modalities: List[str], temperature: float = 0.1, use_all_positives: bool = True):
         """
         Args:
             temperature: Scaling factor for the similarity scores
@@ -58,7 +58,7 @@ class InfoNCELoss(nn.Module):
         super().__init__()
         self.temperature = temperature
         self.use_all_positives = use_all_positives
-        self.modality_keys = ["hne", "spatial", "bulk", "scRNA", "clinical", "wes"]
+        self.modality_keys = modalities
         self.eps = 1e-8  # For numerical stability
 
     def forward(self, batch) -> torch.Tensor:
