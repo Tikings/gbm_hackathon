@@ -116,13 +116,15 @@ class MLP(nn.Module):
                     if norm_layer is not None:
                         module_list.append(norm_layer(layer_size))
 
-        self.network = module_list
+        self.network_layers = module_list
 
         # weights and biases are initialized vy defaults, using appropriate initialize methods.
         # That's why we dont manually do it
 
     def forward(self, x):
-        return self.network(x)
+        for layer in self.network_layers:
+            x = layer(x)
+        return x
 
     def validate_params(self):
         """Checks the validity of the MLP init parameters"""
@@ -201,18 +203,17 @@ class ModalityEncoder(nn.Module):
         return self.mlp(x)
 
 
-@torch.jit.script  # For parallel processing
 class MultiModalEncoder(nn.Module):
     """Global encoder that encompasses all 6 modalities"""
 
     def __init__(
         self,
-        hne_cfg: Dict,
-        spatial_cfg: Dict,
-        sc_cfg: Dict,
-        bulk_cfg: Dict,
-        wes_cfg: Dict,
-        clinical_cfg: Dict,
+        hne_cfg: Dict | None = None,
+        spatial_cfg: Dict | None = None,
+        sc_cfg: Dict | None = None,
+        bulk_cfg: Dict | None = None,
+        wes_cfg: Dict | None = None,
+        clinical_cfg: Dict | None = None,
     ):
         super().__init__()
         # Store configs
@@ -223,32 +224,31 @@ class MultiModalEncoder(nn.Module):
         self.wes_cfg = wes_cfg
         self.clinical_cfg = clinical_cfg
 
+        self.modality_net_map = {}
         # Instantiate architecture
-        self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
-        self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
-        self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
-        self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
-        self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
-        self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
-
-        self.modality_net_map = {
-            "hne": self.hne_net,
-            "spatial": self.spatial_net,
-            "bulk": self.bulk_net,
-            "scRNA": self.sc_net,
-            "clinical": self.clinical_net,
-            "wes": self.wes_net,
-        }
+        if self.hne_cfg is not None:
+            self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
+            self.modality_net_map["hne"] = self.hne_net
+        if self.spatial_cfg is not None:
+            self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
+            self.modality_net_map["spatial"] = self.spatial_net
+        if self.sc_cfg is not None:
+            self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
+            self.modality_net_map["scRNA"] = self.sc_net
+        if self.bulk_cfg is not None:
+            self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
+            self.modality_net_map["bulk"] = self.bulk_net
+        if self.wes_cfg is not None:
+            self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
+            self.modality_net_map["wes"] = self.wes_net
+        if self.clinical_cfg is not None:
+            self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
+            self.modality_net_map["clinical"] = self.clinical_net
 
     def forward(self, x: Dict[str, torch.Tensor]):
-        futures_list = []
+        emb_dict = {}
         for key in self.modality_net_map.keys():
             modality_tensor = x[key]
-            futures_list.append(
-                torch.jit.fork(self.modality_net_map[key], modality_tensor)
-            )
+            emb_dict[key] = self.modality_net_map[key](modality_tensor)
 
-        return {
-            key: torch.jit.wait(future)
-            for key, future in zip(self.modality_net_map.keys(), futures_list)
-        }
+        return emb_dict
