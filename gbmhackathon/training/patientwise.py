@@ -86,7 +86,6 @@ class PatientLearningDataset(Dataset):
 
 def collate_patient_wise(batch): 
     list_patient = [patient[0] for patient in batch]
-    print(list_patient)
     list_dict_tensor = [patient[1] for patient in batch]
     modalities = list(list_dict_tensor[0].keys())
     # The order of the rows are the same as those of the dictionnary with the embeddings
@@ -103,6 +102,5 @@ def collate_patient_wise(batch):
         for dic in list_dict_tensor:
             mod_list.append(dic[mod])
         dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
-    print(dict_batched["wes"].size())
     available_mod_tensor = torch.stack(list_available).type(torch.float32)
     return list_patient, modalities, dict_batched, available_mod_tensor

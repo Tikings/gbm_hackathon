@@ -249,7 +249,6 @@ class MultiModalEncoder(nn.Module):
         emb_dict = {}
         for key in self.modality_net_map.keys():
             modality_tensor = x[key]
-            print(modality_tensor.dtype)
             emb_dict[key] = self.modality_net_map[key](modality_tensor)
 
         return emb_dict
