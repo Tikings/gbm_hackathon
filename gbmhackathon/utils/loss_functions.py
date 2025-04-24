@@ -139,9 +139,8 @@ class InfoNCELoss(nn.Module):
                     numerator = sim_exp[idx].view(-1)[positive_mask].sum()
                 else:
                     # Sample one positive randomly
-                    pos_indices = torch.where(positive_mask)[0]
-                    random_pos_idx = pos_indices[torch.randint(0, len(pos_indices), (1,))]
-                    numerator = sim_exp[idx][random_pos_idx]
+                    random_pos_idx = patient_indices[torch.randint(0, len(patient_indices), (1,))]
+                    numerator = sim_exp[idx].view(-1)[random_pos_idx]
 
                 # Compute denominator: sum of all similarities (excluding self)
                 all_mask = positive_mask | negative_mask
