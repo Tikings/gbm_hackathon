@@ -115,7 +115,32 @@ def get_all_embeddings(dict_annData : Dict[str, ad.AnnData],
     return dict(zip(list_patients, list_latent))
 
 
+def adjacency_to_edge(adjacency_matrix_coo):
+    row = torch.tensor(adjacency_matrix_coo.row, dtype=torch.long)
+    col = torch.tensor(adjacency_matrix_coo.col, dtype=torch.long)
+    return torch.stack([row, col], dim=0)
 
+def get_edge_index(dict_annData : Dict[str, ad.AnnData],
+                       model : novae.model.Novae) -> Dict[str, torch.Tensor]:
+    """Compute all the representations of the data
+
+    Args:
+        dict_annData (Dict[str, ad.AnnData]): Output of the get_data function
+       model (novae.model.Novea): Foundation model retrieved from Hugging Face
+
+    Returns:
+        Dict[str, torch.Tensor]: dictionnary containnig the embeddings computed by the model (values) for
+        each patiert (keys)
+    """
+
+    # Converting to list all the AnnData files
+    list_patients, list_anndata = dict_annData.keys(), list(dict_annData.values())
+
+    # Retreiving all the representations computed
+    list_sparse_mat = [anndata.obsp["spatial_connectivities"].tocoo() for anndata in list_anndata]
+    edge_index = [adjacency_to_edge(mat) for mat in list_sparse_mat]
+
+    return dict(zip(list_patients, edge_index))
 
 ###############################################
 ############## Full pipeline ##################
