@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from typing import Dict, List, Tuple
 import warnings
 
+from torchviz import make_dot
+
 # INFONCE LOSS PSEUDOCODE FOR OUR IDEA
 # X_dict, patient_ids, available_modalities = batch
 # bank = concatenation of all 6 modality tensors of the batch (batch_size * 6, model_output_size)
@@ -49,7 +51,11 @@ class InfoNCELoss(nn.Module):
     It computes contrastive loss between modalities from the same patient (positives) vs. different patients (negatives).
     """
 
-    def __init__(self, modalities: List[str], patient_map: Dict[str, int] = None, temperature: float = 0.1, use_all_positives: bool = True):
+    def __init__(self, modalities: List[str], 
+                 patient_map: Dict[str, int] = None, 
+                 temperature: float = 0.07, 
+                 similarity: str = "original", 
+                 use_all_positives: bool = True):
         """
         Args:
             temperature: Scaling factor for the similarity scores
@@ -57,6 +63,10 @@ class InfoNCELoss(nn.Module):
         """
         super().__init__()
         self.temperature = temperature
+        self.similarity = similarity
+
+        if temperature is None and similarity == "original":
+            raise ValueError("Cannot use temperature == None (logit-scaling) when similarity is original.")
         self.use_all_positives = use_all_positives
         self.modality_keys = modalities
         self.patient_map = patient_map # to translate str patient_ids to unique numbers
@@ -106,9 +116,17 @@ class InfoNCELoss(nn.Module):
             raise ValueError("Only one modality found in the bank. There is something wrong with the batch.")
 
         # Compute similarity matrix
-        similarities = torch.matmul(bank, bank.T) / self.temperature  # [total_present_modalities, total_present_modalities]
+        if self.similarity == "original": # Original InfoNCE uses dot product similarity
+            similarities = torch.matmul(bank, bank.T) 
+        else: # cosine similarity (used in NT-Xent loss which is a variant of the InfoNCELoss)
+            norms = bank.norm(dim=1, keepdim=True).clamp(min=self.eps) # comute per-vector norms
+            bank_normed = bank / norms # normalize each vector by its norm
+            similarities = bank_normed @ bank_normed.T # compute similarity
+            
+        similarities = similarities / self.temperature  # [total_present_modalities, total_present_modalities]
         sim_exp = torch.exp(similarities)
-
+            
+        # print("Exp similarity matrix", sim_exp)
         batch_loss = torch.tensor(0.0, device=device)
         processed_pairs = 0
 
@@ -146,14 +164,149 @@ class InfoNCELoss(nn.Module):
                 all_mask = positive_mask | negative_mask
                 denominator = sim_exp[idx].view(-1)[all_mask].sum()
 
+                # print("NUMERATOR", numerator)
+                # print("DENOMINATOR", denominator)
+                # print("RATIO", numerator / (denominator + self.eps))
                 # Compute loss
                 loss = -torch.log(numerator / (denominator + self.eps))
-                batch_loss = batch_loss + loss
+                # print("-LOG (loss)", loss)
+                batch_loss = torch.add(batch_loss,loss)
                 processed_pairs += 1
 
         # Average loss over all processed pairs
+        # print(batch_loss)
         if processed_pairs > 0:
-            batch_loss = batch_loss / processed_pairs
+            batch_loss = torch.div(batch_loss,processed_pairs)
+            # print(batch_loss)
         else:
             raise ValueError("Something went wrong, no pairs were processed.")
         return batch_loss
+
+# class InfoNCELoss(nn.Module):
+#     """
+#     Implementation of InfoNCE loss for multimodal contrastive learning with missing modalities support,
+#     with debug prints to catch where gradients might be lost.
+#     """
+
+#     def __init__(self, modalities, patient_map=None, temperature=0.1, use_all_positives=True):
+#         super().__init__()
+#         self.temperature = temperature
+#         self.use_all_positives = use_all_positives
+#         self.modality_keys = modalities
+#         self.patient_map = patient_map
+#         self.eps = 1e-8
+
+#     def forward(self, batch):
+#         X_dict, patient_ids, available_modalities = batch
+#         device = next(iter(X_dict.values())).device
+
+#         # Build bank
+#         bank, bank_ids, bank_mods = [], [], []
+#         for m_idx, m in enumerate(self.modality_keys):
+#             emb = X_dict[m]
+#             for p_idx in range(len(patient_ids)):
+#                 if available_modalities[p_idx, m_idx] == 1:
+#                     v = emb[p_idx].view(-1)
+#                     v.retain_grad()
+#                     bank.append(v)
+#                     bank_ids.append(self.patient_map[patient_ids[p_idx]])
+#                     bank_mods.append(m_idx)
+#         bank = torch.stack(bank, 0).to(device)
+#         bank.retain_grad()
+#         bank_ids = torch.tensor(bank_ids, device=device)
+#         bank_mods = torch.tensor(bank_mods, device=device)
+
+#         # Early exit
+#         if bank.size(0) <= 1:
+#             raise ValueError("Need ≥2 embeddings in bank")
+
+#         # Similarity & exp
+#         sim = (bank @ bank.T) / self.temperature
+#         sim.retain_grad()
+#         exp_sim = torch.exp(sim)
+#         exp_sim.retain_grad()
+
+#         total_loss = torch.tensor(0., device=device, requires_grad=True)
+#         total_loss.retain_grad()
+#         count = 0
+
+#         # For each patient
+#         for pid in patient_ids:
+#             pid_num = self.patient_map[pid]
+#             mask = bank_ids == pid_num
+#             idxs = mask.nonzero(as_tuple=False).view(-1)
+
+#             if idxs.numel() < 2:
+#                 warnings.warn(f"No pos pairs for {pid}")
+#                 continue
+
+#             # For each modality embedding of this patient
+#             for idx in idxs:
+#                 # Positive mask (same patient, different modality)
+#                 pos_mask = mask.clone()
+#                 pos_mask[idx] = False
+#                 # Negative mask (everything else)
+#                 neg_mask = ~mask
+
+#                 # Numerator: sum over positives (or sample one)
+#                 pos_vals = exp_sim[idx][pos_mask]
+#                 pos_vals.retain_grad()
+#                 if self.use_all_positives:
+#                     numer = pos_vals.sum()
+#                 else:
+#                     # sample one positive
+#                     weights = pos_vals.detach()
+#                     choice = torch.multinomial(weights, 1)
+#                     numer = pos_vals[choice]
+#                 numer.retain_grad()
+
+#                 # Denominator: sum over all except self, mask missing
+#                 all_vals = exp_sim[idx][pos_mask | neg_mask]
+#                 all_vals.retain_grad()
+#                 denom = all_vals.sum() + self.eps
+#                 denom.retain_grad()
+
+#                 loss_ij = -torch.log(numer / denom + self.eps)
+#                 loss_ij.retain_grad()
+#                 total_loss = torch.add(total_loss,loss_ij)
+#                 total_loss.retain_grad()
+#                 count += 1
+
+#                 # --- DEBUG: backward this partial loss ---
+#                 total_loss.backward(torch.ones_like(total_loss), retain_graph=True)
+
+#                 print(f"\nAfter backward of loss for bank idx {idx.item()}:")
+#                 print(" bank.grad_fn:", bank.grad_fn)
+#                 print(" sim.grad_fn:", sim.grad_fn)
+#                 print(" exp_sim.grad_fn:", exp_sim.grad_fn)
+#                 print(" numer.grad_fn:", numer.grad_fn if hasattr(numer, 'grad_fn') else numer.grad)
+#                 print(" denom.grad_fn:", denom.grad_fn if hasattr(denom, 'grad_fn') else denom.grad)
+#                 print(" pos_vals.grad:", pos_vals.grad)
+#                 print(" all_vals.grad:", all_vals.grad)
+#                 print(" loss_ij.grad_fn:", loss_ij.grad_fn)
+#                 print(" total_loss.grad:", total_loss.grad)
+
+#                 # zero grads before next iteration
+#                 self.zero_grad()
+
+class RegularizedInfoNCELoss(Module):
+    def __init__(self, alpha: float,
+                 modalities: List[str], 
+                 patient_map: Dict[str, int] = None, 
+                 temperature: float = 0.07, 
+                 similarity: str = "original", 
+                 use_all_positives: bool = True):
+        super().__init__()
+        self.infonce = InfoNCELoss(modalities=modalities, 
+                                   patient_map=patient_map, 
+                                   temperature=temperature, 
+                                   similarity=similarity, 
+                                   use_all_positives=use_all_positives)
+        self.alpha = alpha
+
+    def forward(self, batch) -> torch.Tensor:
+        nce_loss = self.infonce(batch)
+
+        X_dict, _, _ = batch
+        for mod in X_dict.keys():
+            
