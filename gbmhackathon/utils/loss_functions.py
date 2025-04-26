@@ -182,113 +182,7 @@ class InfoNCELoss(nn.Module):
         else:
             raise ValueError("Something went wrong, no pairs were processed.")
         return batch_loss
-
-# class InfoNCELoss(nn.Module):
-#     """
-#     Implementation of InfoNCE loss for multimodal contrastive learning with missing modalities support,
-#     with debug prints to catch where gradients might be lost.
-#     """
-
-#     def __init__(self, modalities, patient_map=None, temperature=0.1, use_all_positives=True):
-#         super().__init__()
-#         self.temperature = temperature
-#         self.use_all_positives = use_all_positives
-#         self.modality_keys = modalities
-#         self.patient_map = patient_map
-#         self.eps = 1e-8
-
-#     def forward(self, batch):
-#         out_dict, patient_ids, available_modalities = batch
-#         device = next(iter(out_dict.values())).device
-
-#         # Build bank
-#         bank, bank_ids, bank_mods = [], [], []
-#         for m_idx, m in enumerate(self.modality_keys):
-#             emb = out_dict[m]
-#             for p_idx in range(len(patient_ids)):
-#                 if available_modalities[p_idx, m_idx] == 1:
-#                     v = emb[p_idx].view(-1)
-#                     v.retain_grad()
-#                     bank.append(v)
-#                     bank_ids.append(self.patient_map[patient_ids[p_idx]])
-#                     bank_mods.append(m_idx)
-#         bank = torch.stack(bank, 0).to(device)
-#         bank.retain_grad()
-#         bank_ids = torch.tensor(bank_ids, device=device)
-#         bank_mods = torch.tensor(bank_mods, device=device)
-
-#         # Early exit
-#         if bank.size(0) <= 1:
-#             raise ValueError("Need ≥2 embeddings in bank")
-
-#         # Similarity & exp
-#         sim = (bank @ bank.T) / self.temperature
-#         sim.retain_grad()
-#         exp_sim = torch.exp(sim)
-#         exp_sim.retain_grad()
-
-#         total_loss = torch.tensor(0., device=device, requires_grad=True)
-#         total_loss.retain_grad()
-#         count = 0
-
-#         # For each patient
-#         for pid in patient_ids:
-#             pid_num = self.patient_map[pid]
-#             mask = bank_ids == pid_num
-#             idxs = mask.nonzero(as_tuple=False).view(-1)
-
-#             if idxs.numel() < 2:
-#                 warnings.warn(f"No pos pairs for {pid}")
-#                 continue
-
-#             # For each modality embedding of this patient
-#             for idx in idxs:
-#                 # Positive mask (same patient, different modality)
-#                 pos_mask = mask.clone()
-#                 pos_mask[idx] = False
-#                 # Negative mask (everything else)
-#                 neg_mask = ~mask
-
-#                 # Numerator: sum over positives (or sample one)
-#                 pos_vals = exp_sim[idx][pos_mask]
-#                 pos_vals.retain_grad()
-#                 if self.use_all_positives:
-#                     numer = pos_vals.sum()
-#                 else:
-#                     # sample one positive
-#                     weights = pos_vals.detach()
-#                     choice = torch.multinomial(weights, 1)
-#                     numer = pos_vals[choice]
-#                 numer.retain_grad()
-
-#                 # Denominator: sum over all except self, mask missing
-#                 all_vals = exp_sim[idx][pos_mask | neg_mask]
-#                 all_vals.retain_grad()
-#                 denom = all_vals.sum() + self.eps
-#                 denom.retain_grad()
-
-#                 loss_ij = -torch.log(numer / denom + self.eps)
-#                 loss_ij.retain_grad()
-#                 total_loss = torch.add(total_loss,loss_ij)
-#                 total_loss.retain_grad()
-#                 count += 1
-
-#                 # --- DEBUG: backward this partial loss ---
-#                 total_loss.backward(torch.ones_like(total_loss), retain_graph=True)
-
-#                 print(f"\nAfter backward of loss for bank idx {idx.item()}:")
-#                 print(" bank.grad_fn:", bank.grad_fn)
-#                 print(" sim.grad_fn:", sim.grad_fn)
-#                 print(" exp_sim.grad_fn:", exp_sim.grad_fn)
-#                 print(" numer.grad_fn:", numer.grad_fn if hasattr(numer, 'grad_fn') else numer.grad)
-#                 print(" denom.grad_fn:", denom.grad_fn if hasattr(denom, 'grad_fn') else denom.grad)
-#                 print(" pos_vals.grad:", pos_vals.grad)
-#                 print(" all_vals.grad:", all_vals.grad)
-#                 print(" loss_ij.grad_fn:", loss_ij.grad_fn)
-#                 print(" total_loss.grad:", total_loss.grad)
-
-#                 # zero grads before next iteration
-#                 self.zero_grad()
+        
 class SmoothingFunction(nn.Module):
     def __init__(self, bound: float = -10, 
                  slope: float = 0.05, 
@@ -299,7 +193,7 @@ class SmoothingFunction(nn.Module):
         self.rate = rate
 
     def forward(self, x):
-        return self.bound - (self.bound / (1 + torch.exp(x / self.rate))) + self.slope * x
+        return 0.5 * self.bound - (self.bound / (1 + torch.exp(x / self.rate))) + self.slope * x
 
 def boundary_loss(outputs, min_val=-10, max_val=10):
     # Penalize values below min_val
@@ -359,127 +253,12 @@ class RegularizedInfoNCELoss(nn.Module):
         norm_penalties = torch.norm(all_embeddings, p=2, dim=2)
 
         zero_ratios_per_mod = zero_ratios.t().mean(dim=0)
-        print(zero_ratios_per_mod)
+        # print(zero_ratios_per_mod)
         # Combine penalties (sum of zero ratio and norm penalty)
         # Shape: [num_modalities, batch_size]
         combined_penalties = zero_ratios + zero_ratios_per_mod.sum() + norm_penalties
-        # combined_penalties = combined_penalties + self.beta * boundary_loss(all_embeddings, min_val=self.bound, max_val=-self.bound)
+        combined_penalties = combined_penalties + self.beta * boundary_loss(all_embeddings, min_val=self.bound, max_val=-self.bound)
 
-        
-        # --- Original regularization loss ---
-        # Sum across all modalities and patients, then average by number of patients
         reg_loss = combined_penalties.sum() / N
-        
-
-        # # Compute variance for each patient across modalities
-        # # Shape: [batch_size]
-        # patient_variance = torch.var(patient_zero_ratios, dim=1)
-        
-        # # Average variance across the batch
-        # mean_variance = patient_variance.mean()
-        
-        # # Compute attention scores across modalities
-        # attention_scores = torch.softmax(all_embeddings.mean(dim=2), dim=0)  # [num_modalities, batch_size]
-        # ideal_score = 1.0 / len(out_dict.keys())
-        # attention_imbalance = torch.sum(torch.abs(attention_scores - ideal_score))
-
-        # # Compute correlation matrix between modality embeddings
-        # flattened_embeddings = all_embeddings.view(len(out_dict.keys()), N, -1)
-        # normalized_embeddings = F.normalize(flattened_embeddings, p=2, dim=2)
-        # correlation_matrix = torch.matmul(normalized_embeddings, normalized_embeddings.transpose(1, 2))
-        # correlation_penalty = torch.mean(torch.abs(correlation_matrix - torch.eye(N, device=correlation_matrix.device)))
-
-        # # Calculate average activation per modality
-        # modality_activations = 1 - zero_ratios.mean(dim=1)  # [num_modalities]
-        
-        # # Apply stronger regularization to more active modalities
-        # modality_weights = F.softmax(modality_activations, dim=0)
-        # weighted_regularization = torch.sum(modality_weights * combined_penalties.sum(dim=1))
-
-        # # Compute cross-correlation matrix between modality embeddings
-        # z1 = all_embeddings[0]  # [batch_size, embedding_dim]
-        # z2 = all_embeddings[1]  # [batch_size, embedding_dim]
-        # c = torch.matmul(z1.T, z2) / N  # [embedding_dim, embedding_dim]
-        
-        # # Target: identity matrix to reduce redundancy
-        # on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
-        # off_diag = torch.sum(c**2) - torch.sum(torch.diagonal(c)**2)
-        # barlow_loss = on_diag + 0.005 * off_diag
-
-        # # Calculate KL divergence from uniform distribution
-        # uniform_target = torch.ones_like(zero_ratios) / len(out_dict.keys())
-        # activation_distribution = zero_ratios / zero_ratios.sum(dim=0, keepdim=True)
-        # uniform_loss = F.kl_div(activation_distribution.log(), uniform_target, reduction='batchmean')
-
-        # modality_collapse_loss = 0
-
-        # add_mean_variance = 0
-        # if add_mean_variance == 1:
-        #     modality_collapse_loss = modality_collapse_loss + mean_variance
-        #     print("MEAN VAR:", mean_variance)
-
-        # add_correlation_penalty = 0
-        # if add_correlation_penalty == 1:
-        #     modality_collapse_loss = modality_collapse_loss + correlation_penalty
-        #     print("CORR PEN:", correlation_penalty)
-            
-        # add_attention_imbalance = 0
-        # if add_attention_imbalance == 1:
-        #     modality_collapse_loss = modality_collapse_loss + attention_imbalance
-        #     print("ATTENTION IMB:", attention_imbalance)
-
-        # add_weighted_regularization = 1
-        # if add_weighted_regularization == 1:
-        #     modality_collapse_loss = modality_collapse_loss + weighted_regularization
-        #     print("ADAPTIVE REG:", weighted_regularization)
-
-        # add_barlow_loss = 0
-        # if add_barlow_loss == 1:
-        #     modality_collapse_loss = modality_collapse_loss - barlow_loss
-        #     print("BARLOW:", barlow_loss)
-
-        # add_uniform_loss = 0
-        # if add_uniform_loss == 1:
-        #     modality_collapse_loss = modality_collapse_loss + uniform_loss
-        #     print("UNIFORM:", uniform_loss)
     
-        return self.smoothing_func(nce_loss - self.alpha * reg_loss) #+ self.beta * modality_collapse_loss)
-        
-    # def forward(self, batch) -> torch.Tensor:
-    #     nce_loss = self.infonce(batch)
-        
-    #     out_dict, _, _ = batch
-    #     N = list(out_dict.values())[0].size(0)  # Number of patients
-        
-    #     # Stack all embeddings for vectorized computation
-    #     # Shape: [num_modalities, batch_size, embedding_dim]
-    #     all_embeddings = torch.stack([out_dict[mod].squeeze() for mod in out_dict.keys()])
-    #     # print(all_embeddings.size())
-
-    #     max_value = torch.max(all_embeddings)
-        
-    #     # Calculate zero-activation penalty - vectorized across all modalities and patients
-    #     # Shape after comparison: [num_modalities, batch_size, embedding_dim]
-    #     zero_mask = (all_embeddings.abs() <= self.reg_eps)
-    #     # print(zero_mask.size())
-        
-    #     # Count zeros for each modality-patient pair and normalize by embedding size
-    #     # Shape: [num_modalities, batch_size]  
-    #     embedding_sizes = torch.tensor([all_embeddings.shape[2]] * all_embeddings.shape[0], 
-    #                                   device=all_embeddings.device)[:, None]
-    #     # print(embedding_sizes.size())
-    #     zero_penalties = zero_mask.sum(dim=2) / embedding_sizes
-    #     # print(zero_penalties.size())
-        
-    #     # Calculate L2 norms - vectorized across all modalities and patients
-    #     # Shape: [num_modalities, batch_size]
-    #     norm_penalties = torch.norm(all_embeddings, p=2, dim=2)
-        
-    #     # Combine penalties (sum of zero penalty and norm penalty)
-    #     # Shape: [num_modalities, batch_size]
-    #     combined_penalties = zero_penalties + norm_penalties
-        
-    #     # Sum across all modalities and patients, then average by number of patients
-    #     # Shape: scalar
-    #     reg_loss = combined_penalties.sum() / N
-    #     return self.smoothing_func(nce_loss - self.alpha * reg_loss)
+        return self.smoothing_func(nce_loss - self.alpha * reg_loss)
