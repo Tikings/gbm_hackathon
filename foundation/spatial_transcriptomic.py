@@ -120,8 +120,7 @@ def adjacency_to_edge(adjacency_matrix_coo):
     col = torch.tensor(adjacency_matrix_coo.col, dtype=torch.long)
     return torch.stack([row, col], dim=0)
 
-def get_edge_index(dict_annData : Dict[str, ad.AnnData],
-                       model : novae.model.Novae) -> Dict[str, torch.Tensor]:
+def get_edge_index(dict_annData : Dict[str, ad.AnnData]) -> Dict[str, torch.Tensor]:
     """Compute all the representations of the data
 
     Args:
@@ -165,3 +164,22 @@ def pipeline_novae(patient: List[str] = None,
     return get_all_embeddings(
         dict_annData=dict_annData,
         model = model)
+
+
+def pipeline_novae_spatial_connectivities(patient: List[str] = None,
+                   resolution = "hires",
+                   radius_spatial_neighbors : int = 300,
+                   target_sum : int = 1e6,
+                   model_type = "MICS-Lab/novae-human-0",
+                   ) -> Dict[str, torch.Tensor]:
+
+    #Getting all the data
+    dict_annData = get_data(patient = patient,
+                            resolution = resolution,
+                            radius_spatial_neighbors = radius_spatial_neighbors,
+                            target_sum = target_sum)
+    #Getting the model
+    model = setup_novae(model_type = model_type)
+
+    #Compute embeddings
+    return get_edge_index(dict_annData=dict_annData)
