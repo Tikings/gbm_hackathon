@@ -28,7 +28,7 @@ class PatientLearningDataset(Dataset):
                 self.root, 
                 self.folder,
                 self.name_emb[key])
-            if key in ["clinical","wes"] :
+            if key in ["clinical","wes","hne"] :
                 self.dict_emb[key] = self._load_pickle(
                             self.root, 
                             self.folder,
@@ -101,6 +101,14 @@ def collate_patient_wise(batch):
         # AFTER
         for dic in list_dict_tensor:
             mod_list.append(dic[mod])
-        dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
+        if len(mod_list[0].size()) == 2 and mod_list[0].size(0) > 1:
+            aggregate_tiles = []
+            for tensor in mod_list:
+                # print(tensor.size())
+                aggregate_tiles.append(tensor.mean(dim=0).squeeze())
+                # print(tensor.mean(dim=0).squeeze().size())
+            dict_batched[mod] = torch.stack(aggregate_tiles).type(torch.float32)
+        else:
+            dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
     available_mod_tensor = torch.stack(list_available).type(torch.float32)
     return list_patient, modalities, dict_batched, available_mod_tensor
