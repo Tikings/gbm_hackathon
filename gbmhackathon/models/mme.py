@@ -2,7 +2,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from typing import List, Dict, Callable, Iterable, Any
+from typing import List, Dict, Callable, Iterable, Any, Optional, Union
 from torch.jit import Future
 from torch.nn.parallel import parallel_apply
 
@@ -125,6 +125,9 @@ class MLP(nn.Module):
 
     def forward(self, x):
         for layer in self.network_layers:
+            # if isinstance(layer, nn.Linear):
+            #     print(layer.weight.device, layer.bias.device)
+            #     print(x.device)
             x = layer(x)
         return x
 
@@ -197,10 +200,18 @@ class ModalityEncoder(nn.Module):
         dropout: List[float] | float,
         act_fn: List[Callable | None] | Callable | None,
         norm_layer: List[Callable | None] | Callable | None,
+        device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
-        self.mlp = MLP(layers, dropout, act_fn, norm_layer)
-
+        # Handle device selection - use CUDA if available, otherwise CPU
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+        
+        print(f"Using device: {self.device}")
+        
+        self.mlp: nn.Module = MLP(layers, dropout, act_fn, norm_layer)
     def forward(self, x):
         return self.mlp(x)
 
@@ -231,18 +242,23 @@ class MultiModalEncoder(nn.Module):
         if self.hne_cfg is not None:
             self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
             self.modality_net_map["hne"] = self.hne_net
+            
         if self.spatial_cfg is not None:
             self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
             self.modality_net_map["spatial"] = self.spatial_net
+            
         if self.sc_cfg is not None:
             self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
             self.modality_net_map["scRNA"] = self.sc_net
+            
         if self.bulk_cfg is not None:
             self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
             self.modality_net_map["bulk"] = self.bulk_net
+            
         if self.wes_cfg is not None:
             self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
             self.modality_net_map["wes"] = self.wes_net
+            
         if self.clinical_cfg is not None:
             self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
             self.modality_net_map["clinical"] = self.clinical_net
