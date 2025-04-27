@@ -7,7 +7,7 @@ from pathlib import Path
 from torch.utils.data import Dataset
 import torch
 import re
-from typing import List, Dict
+from typing import List, Dict, Optional, Union
 
 ABSTRA_PROJECT_STORAGE_BUCKET = "s3://abstra-project-storage-lttemftb/1b75dc89-ad27-4a65-9e7f-877d1b4f36fc"
 PATTERN_PATIENT = "(HK_G_[0-9]{3}(a|b))"
@@ -17,10 +17,19 @@ class PatientLearningDataset(Dataset):
                  name_emb : Dict[str, str],
                  folder_name : str,
                  root_s3 : Path = ABSTRA_PROJECT_STORAGE_BUCKET, 
+                 device: Optional[Union[str, torch.device]] = None,
                  ):
         self.root = root_s3
         self.name_emb = name_emb
         self.folder = folder_name
+
+        # Handle device selection - use CUDA if available, otherwise CPU
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+        
+        print(f"Using device: {self.device}")
 
         self.dict_emb = {}
         for key in self.name_emb.keys(): 
@@ -46,7 +55,7 @@ class PatientLearningDataset(Dataset):
 
         # Retrieving patient list
         set_patient = set()
-        for emb_dict in self.dict_emb.values() : 
+        for emb_dict in self.dict_emb.values(): 
             set_patient.update(list(emb_dict.keys()))
         patients = list(set_patient) 
 
@@ -82,7 +91,7 @@ class PatientLearningDataset(Dataset):
             else :
                 dict_patient[key] = torch.zeros(self.size_emb[key])
                 list_available.append(0)
-        return patient, dict_patient, torch.Tensor(list_available).to(torch.int8)
+        return patient, dict_patient, torch.Tensor(list_available).to(torch.int8), self.device
 
 def collate_patient_wise(batch): 
     list_patient = [patient[0] for patient in batch]
@@ -90,17 +99,18 @@ def collate_patient_wise(batch):
     modalities = list(list_dict_tensor[0].keys())
     # The order of the rows are the same as those of the dictionnary with the embeddings
     list_available = [patient[2] for patient in batch]
+    
+    device = [patient[-1] for patient in batch][0]
+    
     dict_batched = {}
     for mod in modalities:
         mod_list = []
-        # BEFORE, wrong logic to batch modality embeddings across patient
-        # for dic in list_dict_tensor:
-        #     print(dic)
-        #     dict_batched[mod] = torch.stack([dic[mod] for _ in dic.keys()])
-
-        # AFTER
         for dic in list_dict_tensor:
-            mod_list.append(dic[mod])
+            # Ensure tensor is on the correct device
+            tensor = dic[mod]
+            if tensor.device != device:
+                tensor = tensor.to(device)
+            mod_list.append(tensor)
         if len(mod_list[0].size()) == 2 and mod_list[0].size(0) > 1:
             aggregate_tiles = []
             for tensor in mod_list:
