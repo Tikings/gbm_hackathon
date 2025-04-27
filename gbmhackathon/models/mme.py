@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from typing import List, Dict, Callable, Iterable, Any
+from torch.jit import Future
+from torch.nn.parallel import parallel_apply
 
 from gbmhackathon.utils.module_functions import instantiate
 
@@ -224,7 +226,7 @@ class MultiModalEncoder(nn.Module):
         self.wes_cfg = wes_cfg
         self.clinical_cfg = clinical_cfg
 
-        self.modality_net_map = {}
+        self.modality_net_map = nn.ModuleDict()
         # Instantiate architecture
         if self.hne_cfg is not None:
             self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
@@ -246,9 +248,12 @@ class MultiModalEncoder(nn.Module):
             self.modality_net_map["clinical"] = self.clinical_net
 
     def forward(self, x: Dict[str, torch.Tensor]):
-        emb_dict = {}
-        for key in self.modality_net_map.keys():
-            modality_tensor = x[key]
-            emb_dict[key] = self.modality_net_map[key](modality_tensor)
+        futures: Dict[str, Future[torch.Tensor]] = {}
+        for name, net in self.modality_net_map.items():
+            futures[name] = torch.jit.fork(net, x[name])
 
-        return emb_dict
+        outputs: Dict[str, torch.Tensor] = {}
+        for name, fut in futures.items():
+            outputs[name] = torch.jit.wait(fut)
+
+        return outputs
