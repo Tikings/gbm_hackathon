@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from torch.optim import Adam
 import numpy as np
 import os
-import datetime
+from datetime import datetime
 import json
 
 
@@ -34,13 +34,13 @@ class experiment :
 
         self.device=self.config["global_settings"]["device"]
         
-        dataset = PatientLearningDataset(self.config["modalities_data"]["modalities"], self.config["modalities_data"]["pkl_storage_folder"], device=self.device)
-        dataloader = DataLoader(dataset, self.config["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator(device=dataset.device))
+        self.dataset = PatientLearningDataset(self.config["modalities_data"]["modalities"], self.config["modalities_data"]["pkl_storage_folder"], device=self.device)
+        self.dataloader = DataLoader(self.dataset, self.config["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator(device=self.dataset.device))
         
         
         self.missing_mods=load_s3(self.config["modalities_data"]["missing_mods"])
         
-        self.id2sample=dataset.ind2patient
+        self.id2sample=self.dataset.ind2patient
         self.patient2id=self.__get_id2patient()
 
         self.input_size_dict=self.__get_InputSize()
@@ -48,9 +48,9 @@ class experiment :
         ##### ICI,certainement modifier les classes 
                 
         hne_cfg = self.__adaptBaseConfig(self.config["architecture"]["mid_capacity_cfg"], self.input_size_dict["hne"])
-        spatial_cfg = self.__adaptBaseConfig(self.config["architecture"]["small_capacity_cfg"], self.inpute_size_dict["spatial"])
-        clinical_cfg = self.__adaptBaseConfig(self.config["architecture"]["small_capacity_cfg"], self.inpute_size_dict["clinical"])
-        wes_cfg = self.__adaptBaseConfig(self.config["architecture"]["mid_capacity_cfg"], self.inpute_size_dict["wes"])
+        spatial_cfg = self.__adaptBaseConfig(self.config["architecture"]["small_capacity_cfg"], self.input_size_dict["spatial"])
+        clinical_cfg = self.__adaptBaseConfig(self.config["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
+        wes_cfg = self.__adaptBaseConfig(self.config["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
 
         
         self.mme_cfg={"hne_cfg":hne_cfg, "clinical_cfg":clinical_cfg, "wes_cfg":wes_cfg, "spatial_cfg":spatial_cfg}
@@ -139,7 +139,7 @@ class experiment :
         for patient_id, idx in patient_map.items():
             if patient_id.endswith('b'): # pour les rechutes on met le même index que le sample original
                 patient_map[patient_id] = idx - 1
-        patient_map
+        return patient_map
     
     def __get_InputSize(self) : 
         
@@ -198,7 +198,7 @@ class experiment :
         """
         """
 
-        output_folder=self.config["global_settings"]
+        output_folder=self.config["global_settings"]["output_dir"]
         assert os.path.exists(output_folder), "The output folder specified does not exist"
 
         name_folder="experiment_{}".format(datetime.now().strftime("%Y-%m-%d_%H-%M"))

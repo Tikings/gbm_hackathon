@@ -1,0 +1,32 @@
+{"model" : 
+            {"ModalityEncoder" : {
+
+                "global" : {},
+                "HnE" : {"used":true,
+                         "registry_name": "HnE",
+                        "config": {"layers" : [24,78,98]}},
+                "Bulk" : {"used":false,
+                          "registry_name": "Bulk",
+                          "config": {"layers" : [24,78,98]}
+
+            }},            
+
+"training" : 
+            {"epochs" : 10,
+              "optimizer" : "SGD",
+              "Lr" : 0.001
+
+             },
+
+"datasets" :  {
+
+            "HnE" : {"used" : true,
+                     "train": {"path": ""},
+                     "test": {"path" : ""}
+                      },
+            "Bulk" : {
+                "train": {"path": ""},
+                "test": {"path" : ""}
+                 }          
+        }
+}

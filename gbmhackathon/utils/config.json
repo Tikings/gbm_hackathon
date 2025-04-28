@@ -16,8 +16,8 @@
                 "epochs" :1,
               
                 "InfoNCE_Loss": {
-                        "temp" :0.05,
-                        "sim":"nt-xent", 
+                        "temperature" :0.05,
+                        "similarity":"nt-xent", 
                         "alpha" : 0.1,
                         "bound" :-10, 
                         "beta" : 0.2,
