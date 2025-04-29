@@ -18,9 +18,9 @@ import json
 
 
 
-class experiment : 
+class MME_Global : 
 
-    def __init__(self,config) :
+    def __init__(self,config,save=True) :
 
         """
         
@@ -29,16 +29,17 @@ class experiment :
 
 
         self.config=config
-
-        self.__setup_output_folder()
+        self.save=save
+        if self.save :
+            self.__setup_output_folder()
 
         self.device=self.config["global_settings"]["device"]
         
-        self.dataset = PatientLearningDataset(self.config["modalities_data"]["modalities"], self.config["modalities_data"]["pkl_storage_folder"], device=self.device)
-        self.dataloader = DataLoader(self.dataset, self.config["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator(device=self.dataset.device))
+        self.dataset = PatientLearningDataset(self.config["MME_Model"]["modalities_data"]["modalities"], self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"], device=self.device)
+        self.dataloader = DataLoader(self.dataset, self.config["MME_Model"]["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator(device=self.dataset.device))
         
         
-        self.missing_mods=load_s3(self.config["modalities_data"]["missing_mods"])
+        self.missing_mods=load_s3(self.config["MME_Model"]["modalities_data"]["missing_mods"])
         
         self.id2sample=self.dataset.ind2patient
         self.patient2id=self.__get_id2patient()
@@ -47,10 +48,10 @@ class experiment :
 
         ##### ICI,certainement modifier les classes 
                 
-        hne_cfg = self.__adaptBaseConfig(self.config["architecture"]["mid_capacity_cfg"], self.input_size_dict["hne"])
-        spatial_cfg = self.__adaptBaseConfig(self.config["architecture"]["small_capacity_cfg"], self.input_size_dict["spatial"])
-        clinical_cfg = self.__adaptBaseConfig(self.config["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
-        wes_cfg = self.__adaptBaseConfig(self.config["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
+        hne_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["hne"])
+        spatial_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["spatial"])
+        clinical_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
+        wes_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
 
         
         self.mme_cfg={"hne_cfg":hne_cfg, "clinical_cfg":clinical_cfg, "wes_cfg":wes_cfg, "spatial_cfg":spatial_cfg}
@@ -72,15 +73,15 @@ class experiment :
         mme = self.mme
         mme = torch.jit.script(mme)
 
-        loss_fn = RegularizedInfoNCELoss(list(self.config["modalities_data"]["modalities"].keys()),
-                                        self.patient2id, **self.config["training"]["InfoNCE_Loss"])
+        loss_fn = RegularizedInfoNCELoss(list(self.config["MME_Model"]["modalities_data"]["modalities"].keys()),
+                                        self.patient2id, **self.config["MME_Model"]["training"]["InfoNCE_Loss"])
         optimizer = Adam(
             mme.parameters(),
             lr=1e-3,
         )
 
         EPOCH_LOSSES = []
-        for epoch in range(self.config["training"]["epochs"]):
+        for epoch in range(self.config["MME_Model"]["training"]["epochs"]):
             
             epoch_loss = []
             for i, batch in enumerate(self.dataloader):
@@ -123,7 +124,11 @@ class experiment :
                 print("BREAK")
                 break
             EPOCH_LOSSES.append(np.mean(epoch_loss))
-        ###return EPOCH_LOSSES, mme
+        
+        self.mme=mme
+        self.training={"epoch_losses" : EPOCH_LOSSES}
+
+        
 
 
 
@@ -170,7 +175,7 @@ class experiment :
         REPRENDRE APRES INDICATIONS RAPH
         """
 
-        for modality in self.config["architecture"].keys(): 
+        for modality in self.config["MME_Model"]["architecture"].keys(): 
             pass
 
     
@@ -179,7 +184,7 @@ class experiment :
         REPRENDRE APRES INDICATIONS RAPH
         """
 
-        base_copy=deepcopy(self.config["architecture"]["base_config"])
+        base_copy=deepcopy(self.config["MME_Model"]["architecture"]["base_config"])
         base_copy["layers"] = [input_size] + base_copy["layers"]
         return base_copy
 
