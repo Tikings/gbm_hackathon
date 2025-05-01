@@ -1,0 +1,99 @@
+{"global_settings" : {
+                "device": "cpu",
+                "output_dir" : ""
+                },
+    
+"MME_Model" :  {"modalities_data": { "modalities" :{"hne":"embeddings_HnE_OptimusH0.pkl",
+                    "spatial":"2025-03-23_18-32_spatial_emb_V1.pkl",
+                    "clinical":"2025-03-30_14-23_clinical_emb_V1.pkl",
+                    "wes":"2025-04-05_13-40_wes_emb_V1.pkl"},
+                     "pkl_storage_folder" :  "embedding_V1",
+                     "missing_mods" : "s3://abstra-project-storage-lttemftb/1b75dc89-ad27-4a65-9e7f-877d1b4f36fc/missing_mod_per_samples.pkl"
+            } ,
+
+                "training" : {
+                                "batch_size" : 16,
+                                "epochs" :5,
+                        
+                                "InfoNCE_Loss": {
+                                        "temperature" :0.05,
+                                        "similarity":"nt-xent", 
+                                        "alpha" : 0.1,
+                                        "bound" :-10, 
+                                        "beta" : 0.2,
+                                        "nce_eps": 1e-8,
+                                        "reg_eps":1e-8,
+                                        "use_all_positives" : false},
+                                "Optimizer" : {
+                                        "lr" : 1e-3}
+
+                },
+
+
+                "architecture" : {
+
+                                "base_config" : {"layers": [1024,512,64],
+                                                        "dropout": 0.65,
+                                                        "act_fn": "SmoothingFunction",
+                                                        "norm_layer": null},
+                                
+
+                                "high_capacity_cfg" : {"layers": [1024,512,256,64],
+                                                        "dropout": 0.65,
+                                                        "act_fn":"SmoothingFunction",
+                                                        "norm_layer":null
+                                                        },
+
+                                "mid_capacity_cfg" : {"layers": [256,128,64,64],
+                                                        "dropout": 0.55,
+                                                        "act_fn":"SmoothingFunction",
+                                                        "norm_layer":null
+                                                        },
+
+                                "small_capacity_cfg" : {"layers": [128,64,64],
+                                                        
+                                                        "dropout": 0.45,
+                                                        "act_fn":"SmoothingFunction",
+                                                        "norm_layer":null
+                                                } 
+
+
+                }
+                },
+
+"Experiments" : {
+
+        "Multiple_run_experiment" : {
+                "process" : true,
+                "params" : {
+                        "n_run" : 10
+                }
+        
+
+        }
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+}
+
+
+
+
+
+
+

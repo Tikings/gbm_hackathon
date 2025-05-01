@@ -2,6 +2,8 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GATConv, GlobalAttention, global_mean_pool
 from typing import List, Dict, Callable, Iterable, Any, Optional, Union
 from torch.jit import Future
 from torch.nn.parallel import parallel_apply
@@ -190,6 +192,43 @@ class MLP(nn.Module):
                 f"Wrong norm_layer list length must be len(layers) - 1 ({len(self.layers_arg) - 1}) but found {len(self.norm_layer_arg)}"
             )
 
+
+class GraphEncoder(nn.Module):
+    def __init__(self,
+                in_channels : int,
+                hidden_channels : int,
+                out_channels : int,
+                dropout : float,
+                mean_pool : bool = False, 
+                activation_post_gat : Callable = F.relu,
+                att_agg_activation : Callable = nn.RelU,
+                heads : int = 1,
+                ):
+        super(GraphEncoder, self).__init__()
+
+        self.gat = GATConv(in_channels, hidden_channels, heads=heads, concat=True)
+        self.dropout = nn.Dropout(dropout)
+
+        self.pooling = GlobalAttention(
+            gate_nn=nn.Sequential(
+                nn.Linear(hidden_channels * heads, hidden_channels),
+                att_agg_activation(),
+                nn.Linear(hidden_channels, 1)
+            )
+        ) if not mean_pool else global_mean_pool
+
+        self.activation_post_gat = activation_post_gat
+        self.fc = nn.Linear(hidden_channels * heads, out_channels)
+
+    def forward(self, x, edge_index, batch):
+
+        x = self.gat(x, edge_index)
+        x = self.activation_post_gat(x)
+        x = self.dropout(x)  
+        x = self.pooling(x, batch)
+        x = self.fc(x)
+
+        return x
 
 class ModalityEncoder(nn.Module):
     """Defines a unified module for all Encoders."""
