@@ -201,7 +201,7 @@ class GraphEncoder(nn.Module):
                 dropout : float,
                 mean_pool : bool = False, 
                 activation_post_gat : Callable = F.relu,
-                att_agg_activation : Callable = nn.RelU,
+                att_agg_activation : Callable = nn.ReLU,
                 heads : int = 1,
                 ):
         super(GraphEncoder, self).__init__()
