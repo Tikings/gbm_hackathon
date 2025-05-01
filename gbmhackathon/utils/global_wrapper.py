@@ -47,14 +47,25 @@ class MME_Global :
         self.input_size_dict=self.__get_InputSize()
 
         ##### ICI,certainement modifier les classes 
-                
-        hne_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["hne"])
-        spatial_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["spatial"])
-        clinical_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
-        wes_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
-
+        self.available_modalities=self.__get_available_modalities()
+        self.mme_cfg=dict()
         
-        self.mme_cfg={"hne_cfg":hne_cfg, "clinical_cfg":clinical_cfg, "wes_cfg":wes_cfg, "spatial_cfg":spatial_cfg}
+        if "hne" in self.available_modalities : 
+            hne_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["hne"])
+            self.mme_cfg["hne_cfg"]=hne_cfg
+
+        if "spatial" in self.available_modalities : 
+             spatial_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["spatial"])
+             self.mme_cfg["spatial_cfg"]=spatial_cfg
+        if "clinical" in self.available_modalities : 
+            clinical_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
+            self.mme_cfg["clinical_cfg"]=clinical_cfg
+        
+        if "spatial" in self.available_modalities : 
+            wes_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
+            self.mme_cfg["wes_cfg"]=wes_cfg
+        
+       
         self.__replace_instance_modality_cfg()
 
         self.mme=MultiModalEncoder(**self.mme_cfg).to(self.device)
@@ -215,8 +226,16 @@ class MME_Global :
         with open(os.path.join(self.experiment_dir,"config.json"), "w") as f:
             json.dump(self.config, f)
 
+    def __get_available_modalities(self): 
 
-    
+        mod_cfg=self.config["MME_Model"]["modalities_data"]["modalities"]
+        list_modalities=list()
+
+        for modality in mod_cfg.keys(): 
+            if modality not in ["pkl_storage_folder","missing_mods"] :
+                list_modalities.append(modality)
+
+        return list_modalities
     def __verify_config(self): 
         """
         verify here whatever you want on config
