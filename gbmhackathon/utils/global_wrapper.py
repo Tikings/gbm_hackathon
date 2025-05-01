@@ -107,10 +107,15 @@ class MME_Global :
                     if self.__check(X_dict[mod]):
                         NANFLAG[mod] = 1
                         
-                    for key, tensor in dict(mme.modality_net_map[list(mme.modality_net_map.keys())[0]].named_parameters()).items():
+                    # for key, tensor in dict(mme.modality_net_map[list(mme.modality_net_map.keys())[0]].named_parameters()).items():
+                    #     if self.__check(tensor):
+                    #         NANFLAG[mod] = 1
+                    #         break
+
+                    first_net = list(mme.modality_net_map.children())[0]  # Récupère le premier module
+                    for name, tensor in first_net.named_parameters():
                         if self.__check(tensor):
                             NANFLAG[mod] = 1
-                            break
                     if self.__check(encoded[mod]):
                         NANFLAG[mod] = 1
                 if 1 in list(NANFLAG.values()):

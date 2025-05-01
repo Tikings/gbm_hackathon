@@ -39,13 +39,13 @@ class training_experiment :
             json.dump(self.config, f)
 
 
-    def __Multiple_run_experiment(self) : 
+    def Multiple_run_experiment(self) : 
          
         """
         
         """
         
-        exp_folder=os.path.join(self.experiment_config,"Multiple_run_experiment")
+        exp_folder=os.path.join(self.experiment_dir,"Multiple_run_experiment")
         if not os.path.exists(exp_folder) : 
              os.makedirs(exp_folder)
 
@@ -53,7 +53,7 @@ class training_experiment :
         config_exp=self.config["Experiments"]["Multiple_run_experiment"]["params"]
         epochs=self.config["MME_Model"]["training"]["epochs"]
         list_run_loss={}
-        for run in range(config_exp["n_runs"]) : 
+        for run in range(config_exp["n_run"]) : 
              
              mod=global_wrapper.MME_Global(self.config,save=False)
              mod.fit_mme()
@@ -63,11 +63,16 @@ class training_experiment :
 
         plt.figure(figsize=(8, 5))
 
-        for run in range(list_run_loss.keys()):
+        for run in range(len(list(list_run_loss.keys()))):
             plt.plot(range(1, epochs+1), list_run_loss[run], linewidth=1, c='grey', label=f'Run {run+1}')
 
         avg_curve = np.mean(np.stack(list(list_run_loss.values()), axis=0), axis=0)
-        plt.plot(range(1, epochs+1), avg_curve, linewidth=3, label='Average', zorder=10)
+        plt.plot(range(1, epochs+1), avg_curve, linewidth=3, label='Average', zorder=10)   
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Loss Curves for Each Run with Average')
+        plt.legend()
+        plt.grid(True)
         fig=plt.gcf()
         fig.savefig(os.path.join(exp_folder,'loss_curves.pdf'),dpi=1000)
 
