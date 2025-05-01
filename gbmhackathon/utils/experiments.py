@@ -1,5 +1,4 @@
-
-import global_wrapper
+from gbmhackathon.utils import global_wrapper
 
 from datetime import datetime
 import os
@@ -8,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-class training_experiment() : 
+class training_experiment : 
 
 
     def __init__(self,config) : 

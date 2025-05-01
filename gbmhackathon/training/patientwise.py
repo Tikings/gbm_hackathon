@@ -121,7 +121,7 @@ def collate_patient_wise(batch):
     if "connectivities" in modalities :
         modalities.remove("connectivities")
     
-    print(f" Modalities available : {modalities}")
+    #print(f" Modalities available : {modalities}")
     
     # The order of the rows are the same as those of the dictionnary with the embeddings
     list_available = [patient[2] for patient in batch]

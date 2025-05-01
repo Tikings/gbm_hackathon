@@ -48,6 +48,7 @@ class MME_Global :
 
         ##### ICI,certainement modifier les classes 
         self.available_modalities=self.__get_available_modalities()
+        assert len(self.available_modalities)>0, '0 modality detected, weird'
         self.mme_cfg=dict()
         
         if "hne" in self.available_modalities : 
@@ -61,7 +62,7 @@ class MME_Global :
             clinical_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
             self.mme_cfg["clinical_cfg"]=clinical_cfg
         
-        if "spatial" in self.available_modalities : 
+        if "wes" in self.available_modalities : 
             wes_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
             self.mme_cfg["wes_cfg"]=wes_cfg
         
@@ -106,7 +107,7 @@ class MME_Global :
                     if self.__check(X_dict[mod]):
                         NANFLAG[mod] = 1
                         
-                    for key, tensor in dict(mme.wes_net.named_parameters()).items():
+                    for key, tensor in dict(mme.modality_net_map[list(mme.modality_net_map.keys())[0]].named_parameters()).items():
                         if self.__check(tensor):
                             NANFLAG[mod] = 1
                             break
