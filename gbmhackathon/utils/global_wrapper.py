@@ -15,6 +15,8 @@ import numpy as np
 import os
 from datetime import datetime
 import json
+import pickle as pkl 
+
 
 
 
@@ -70,9 +72,9 @@ class MME_Global :
         self.__replace_instance_modality_cfg()
 
         self.mme=MultiModalEncoder(**self.mme_cfg).to(self.device)
+        self.trained=False
 
-
-
+        
 
 
     def fit_mme(self) : 
@@ -144,12 +146,46 @@ class MME_Global :
         
         self.mme=mme
         self.training={"epoch_losses" : EPOCH_LOSSES}
-
+        self.trained=True
         
 
 
 
-    
+    def __save_model(self,name: str= None): 
+        
+        assert (self.trained==True), "The model should be saved before saving, but it is not "
+        if name is None : 
+            name="mme_model.pt"
+        self.path_model=os.path.join(self.experiment_dir,name)
+        torch.save(self.mme.state_dict(),self.path_model)
+        
+
+
+
+
+    def save(self,name:str=None):
+
+        if name is None : 
+
+            name="{}.pkl".format(self.__class__.__name__)
+        
+        self.__save_model()
+        self.mme=None ### On sauvegarde le modèle dans un obet à part
+        with open(os.path.join(self.experiment_dir,name), 'wb') as f:
+                pkl.dump(self, f)
+
+
+         
+    def reload_model(self): 
+        """
+        Pour reload le modèle après réouverture de la classe à postériorie
+        """
+
+        self.mme=MultiModalEncoder(**self.mme_cfg).to(self.device)
+        state_dict = torch.load(self.path_model)
+        self.mme.load_state_dict(state_dict)
+
+
 
     def __get_id2patient(self) : 
 
@@ -250,7 +286,8 @@ class MME_Global :
 
 
         pass
-
+    
+    
 
         
 
