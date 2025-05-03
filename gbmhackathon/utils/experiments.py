@@ -90,10 +90,9 @@ class model_comparisons :
         """
         self.original_config=config
         self.overrided_config=self.instantiate_overrides_config(overrides)
-        
-             
-             
-            
+
+
+
 
     def instantiate_overrides_config(self,overrides) :    
     
@@ -103,7 +102,7 @@ class model_comparisons :
         for conf_name,conf in overrides.items() : 
              
             flatten_overr=flatten(conf,reducer='dot')
-            original_flatten=flatten(self.config,reducer='dot')
+            original_flatten=flatten(self.original_config,reducer='dot')
 
             for overr_key,value in flatten_overr.items(): 
                  
@@ -113,6 +112,15 @@ class model_comparisons :
                  overrided_config[conf_name]=unflatten(original_flatten,splitter="dot")
 
         return overrided_config
+    
+
+    def test_rapidos(self) : 
+         
+         for override,config in self.overrided_config.items(): 
+              print("override {}!!! ".format(override))
+              wahou=global_wrapper.MME_Global(config)
+              wahou.fit_mme()
+
 
 
 
