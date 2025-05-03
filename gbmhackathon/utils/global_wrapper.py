@@ -31,8 +31,8 @@ class MME_Global :
 
 
         self.config=config
-        self.save=save
-        if self.save :
+        self.save_output=save
+        if self.save_output :
             self.__setup_output_folder()
 
         self.device=self.config["global_settings"]["device"]
@@ -175,7 +175,7 @@ class MME_Global :
                 pkl.dump(self, f)
 
 
-         
+
     def reload_model(self): 
         """
         Pour reload le modèle après réouverture de la classe à postériorie
