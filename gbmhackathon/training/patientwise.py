@@ -8,6 +8,8 @@ from torch.utils.data import Dataset
 import torch
 import re
 from typing import List, Dict, Optional, Union
+from copy import deepcopy
+from itertools import product
 
 ABSTRA_PROJECT_STORAGE_BUCKET = "s3://abstra-project-storage-lttemftb/1b75dc89-ad27-4a65-9e7f-877d1b4f36fc"
 PATTERN_PATIENT = "(HK_G_[0-9]{3}(a|b))"
@@ -18,10 +20,12 @@ class PatientLearningDataset(Dataset):
                  folder_name : str,
                  root_s3 : Path = ABSTRA_PROJECT_STORAGE_BUCKET, 
                  device: Optional[Union[str, torch.device]] = None,
+                 dropout: bool = False,
                  ):
         self.root = root_s3
         self.name_emb = name_emb
         self.folder = folder_name
+        self.dropout = dropout
 
         # Handle device selection - use CUDA if available, otherwise CPU
         if device is None:
@@ -37,7 +41,7 @@ class PatientLearningDataset(Dataset):
                 self.root, 
                 self.folder,
                 self.name_emb[key])
-            if key in ["clinical","wes","hne"] :
+            if key in ["clinical","wes","hne","bulk","scRNA"] :
                 self.dict_emb[key] = self._load_pickle(
                             self.root, 
                             self.folder,
@@ -61,6 +65,9 @@ class PatientLearningDataset(Dataset):
 
         index_patient = list(range(len(patients)))
         self.ind2patient = dict(zip(index_patient, patients))
+
+        if self.dropout:
+            self.augment_dataset()
 
     def _load_pickle(self, root, folder_name,  emb_name):
         path = str(root + "/" + folder_name + "/" + emb_name)
@@ -92,6 +99,41 @@ class PatientLearningDataset(Dataset):
                 dict_patient[key] = torch.zeros(self.size_emb[key])
                 list_available.append(0)
         return patient, dict_patient, torch.Tensor(list_available).to(torch.int8), self.device
+
+    def augment_dataset(self):
+        all_ids = list(self.ind2patient.keys())
+        last_idx = all_ids[-1]
+        new_idx = last_idx + 1
+        for pidx in all_ids:
+            patient, patient_mod_dict, available_mod_tensor, _ = self.__getitem__(pidx)
+            modalities = patient_mod_dict.keys()
+            if available_mod_tensor.sum() < len(modalities):
+                patient_non_missing_modalities = [mod for mod_i,mod in enumerate(modalities) if available_mod_tensor[mod_i] == 1]
+                # print(f"NON MISSING MODS: {patient_non_missing_modalities}")
+                n_available = len(patient_non_missing_modalities)
+                
+                patient_missing_modalities = [mod for mod_i,mod in enumerate(modalities) if available_mod_tensor[mod_i] == 0]
+                # print(f"MISSING MODS: {patient_missing_modalities}")
+                n_missing = len(patient_missing_modalities)
+    
+                # generate possible augmentations (only on available modalities)
+                possible_augmentations = [t for t in list(product([0,1], repeat=n_available)) if sum(t) > 0 and sum(t) != n_available]
+        
+                for aug in possible_augmentations:
+                    knockout_mods = [patient_non_missing_modalities[i] for i in range(n_available) if aug[i] == 0]
+                    # print(f"KNOCKOUT MODS: {knockout_mods}")
+                    augmented_dict = deepcopy(patient_mod_dict)
+    
+                    # new id to identify augmented samples
+                    augmented_patient_id = f"{patient}_d{''.join(knockout_mods)}"
+                    # print(f"Augmented ID: {augmented_patient_id}")
+                    self.ind2patient[new_idx] = augmented_patient_id
+                    new_idx += 1
+                    for mod in augmented_dict.keys():
+                        # If we do not add the knockout mods, they will be treted as missing by __getitem__
+                        if mod not in knockout_mods and mod not in patient_missing_modalities: 
+                            self.dict_emb[mod][augmented_patient_id] = augmented_dict[mod]
+            
 
 def batcher_graphs(
     batch_emb : List[torch.Tensor],

@@ -3,6 +3,7 @@ s3fs
 dotenv
 prince
 torch
+torchviz
 transformers
 tifffile
 tiffslide

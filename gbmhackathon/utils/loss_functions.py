@@ -72,7 +72,14 @@ class InfoNCELoss(nn.Module):
         self.modality_keys = modalities
         self.patient_map = patient_map # to translate str patient_ids to unique numbers
         self.eps = eps  # For numerical stability
-
+        self.pos_alignments = []
+        self.neg_alignments = []
+        
+    def clear_alignments(self):
+        self.pos_alignments = []
+        self.neg_alignments = []
+        print("Alignments cleared")
+        
     def forward(self, batch) -> torch.Tensor:
         """
         Forward pass to compute the InfoNCE loss.
@@ -152,15 +159,22 @@ class InfoNCELoss(nn.Module):
                 # Negative mask (different patients)
                 negative_mask = ~patient_mask
 
-                # Compute numerator: sum of exp similarities with positive pairs
+                # Choose positives
                 if self.use_all_positives:
-                    # Use all positive pairs
-                    numerator = sim_exp[idx].view(-1)[positive_mask].sum()
+                    pos_idxs = positive_mask.nonzero(as_tuple=False).view(-1)
                 else:
-                    # Sample one positive randomly
-                    random_pos_idx = patient_indices[torch.randint(0, len(patient_indices), (1,))]
-                    numerator = sim_exp[idx].view(-1)[random_pos_idx]
+                    pos_idxs = patient_indices[torch.randint(len(patient_indices), (1,))]
+                neg_idxs = negative_mask.nonzero(as_tuple=False).view(-1)
 
+                # Numerator: sum of positive exponentials
+                numerator = sim_exp[idx, pos_idxs].sum()
+
+                # Store raw alignment
+                pos_sims = torch.log(sim_exp[idx, pos_idxs]) * self.temperature
+                neg_sims = torch.log(sim_exp[idx, neg_idxs]) * self.temperature
+                self.pos_alignments.extend(pos_sims.detach().cpu().tolist())
+                self.neg_alignments.extend(neg_sims.detach().cpu().tolist())
+                    
                 # Compute denominator: sum of all similarities (excluding self)
                 all_mask = positive_mask | negative_mask
                 denominator = sim_exp[idx].view(-1)[all_mask].sum()
@@ -201,21 +215,67 @@ def boundary_loss(outputs, min_val=-10, max_val=10):
     # Penalize values above max_val
     above_max = torch.relu(outputs - max_val)
     return torch.mean(below_min + above_max)
-    
+
+class RankMe(nn.Module):
+    """
+    Computes the effective rank (RankMe) of a batch of embeddings.
+    RankMe = exp( - sum_k p_k log p_k ),
+    where p_k = sigma_k / sum_j sigma_j are normalized singular values.
+    """
+
+    def __init__(self, eps: float = 1e-12):
+        """
+        Args:
+            eps: small constant to avoid log(0) or division by zero.
+        """
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            embeddings: Tensor of shape [B, D] or [B, ... , D], where B is batch size
+                        and D is embedding dimensionality. Any leading dimensions
+                        will be flattened into the batch.
+        
+        Returns:
+            rankme: scalar tensor, the effective rank of the batch.
+        """
+        # flatten any extra dims into batch
+        x = embeddings.view(-1, embeddings.size(-1))  # [N, D]
+        N, D = x.shape
+
+        # compute singular values via SVD
+        # Note: torch.linalg.svd may be faster; here we use torch.svd for compatibility
+        # U, S, V = torch.svd(x, some=False)
+        # Use torch.linalg.svd for newer PyTorch:
+        S = torch.linalg.svdvals(x)  # shape [min(N, D)]
+
+        # normalize singular values to get a probability distribution
+        s_sum = S.sum() + self.eps
+        p = S / s_sum
+
+        # compute entropy of spectrum
+        entropy = -(p * torch.log(p + self.eps)).sum()
+
+        # effective rank = exp(entropy)
+        rankme = torch.exp(entropy)
+
+        return rankme
+        
 class RegularizedInfoNCELoss(nn.Module):
     def __init__(self,
                  modalities: List[str], 
                  patient_map: Dict[str, int] = None, 
                  temperature: float = 0.07, 
-                 similarity: str = "original", 
+                 similarity: str = "nt-xent", 
                  use_all_positives: bool = True,
                  alpha: float = 0.1,
-                 beta: float = 0.2,
-                 nce_eps: float = 1e-8,
-                 reg_eps: float = 1e-8,
+                 eps: float = 1e-8,
                  bound: float = -10, 
                  slope: float = 0.05, 
-                 rate: float = -2):
+                 rate: float = -2,
+                ):
         super().__init__()
         self.infonce = InfoNCELoss(modalities=modalities, 
                                    patient_map=patient_map, 
@@ -226,8 +286,9 @@ class RegularizedInfoNCELoss(nn.Module):
         self.smoothing_func = SmoothingFunction(bound=self.bound, slope=slope, rate=rate)
         
         self.alpha = alpha
-        self.beta = beta
-        self.reg_eps = reg_eps
+        self.eps = eps
+        self.rankme_func = RankMe()
+        
     def forward(self, batch) -> torch.Tensor:
         nce_loss = self.infonce(batch)
         
@@ -240,7 +301,7 @@ class RegularizedInfoNCELoss(nn.Module):
         
         # Calculate zero-activation penalty - vectorized across all modalities and patients
         # Shape after comparison: [num_modalities, batch_size, embedding_dim]
-        zero_mask = (all_embeddings.abs() <= self.reg_eps)
+        zero_mask = (all_embeddings.abs() <= self.eps)
         
         # Count zeros for each modality-patient pair and normalize by embedding size
         # Shape: [num_modalities, batch_size]  
@@ -256,9 +317,8 @@ class RegularizedInfoNCELoss(nn.Module):
         # print(zero_ratios_per_mod)
         # Combine penalties (sum of zero ratio and norm penalty)
         # Shape: [num_modalities, batch_size]
-        combined_penalties = zero_ratios + zero_ratios_per_mod.sum() + norm_penalties
-        combined_penalties = combined_penalties + self.beta * boundary_loss(all_embeddings, min_val=self.bound, max_val=-self.bound)
-
-        reg_loss = combined_penalties.sum() / N
+        combined_penalties = zero_ratios + zero_ratios_per_mod.sum() - norm_penalties
+        torch.clamp(combined_penalties, max=100)
+        reg_loss = combined_penalties.sum()
     
         return self.smoothing_func(nce_loss - self.alpha * reg_loss)

@@ -312,3 +312,54 @@ class MultiModalEncoder(nn.Module):
             outputs[name] = torch.jit.wait(fut)
 
         return outputs
+
+class GBMNet(nn.Module):
+    """Global model to learn predictive tasks"""
+
+    def __init__(
+        self,
+        head_cfg: Dict,
+        include_mme: bool = False,
+        hne_cfg: Dict | None = None,
+        spatial_cfg: Dict | None = None,
+        sc_cfg: Dict | None = None,
+        bulk_cfg: Dict | None = None,
+        wes_cfg: Dict | None = None,
+        clinical_cfg: Dict | None = None,
+    ):
+        super().__init__()
+        # Store configs
+        self.head_cfg = head_cfg
+        self.include_mme = include_mme
+
+        if include_mme:
+            self.hne_cfg = hne_cfg
+            self.spatial_cfg = spatial_cfg
+            self.sc_cfg = sc_cfg
+            self.bulk_cfg = bulk_cfg
+            self.wes_cfg = wes_cfg
+            self.clinical_cfg = clinical_cfg
+
+            global_mme_cfg = {"hne_cfg": self.hne_cfg,
+                             "spatial_cfg":self.spatial_cfg,
+                             "sc_cfg":self.sc_cfg,
+                             "bulk_cfg":self.bulk_cfg,
+                             "wes_cfg": self.wes_cfg,
+                             "clinical_cfg": self.clinical_cfg}
+            self.mme = MultiModalEncoder(**global_mme_cfg)
+        else:
+            # None for now but should be replaced with load_model(mme_path)
+            self.mme = None
+
+        self.head_net = MLP(**self.head_cfg)
+
+    def forward(self, x: Dict[str, torch.Tensor]):
+        if self.mme is not None:
+            x = self.mme(x)
+            x_list = []
+            for pid in x[list(x.keys())[0]].size(0):
+                patient_representation = torch.cat([x[mod][pid] for mod in x.keys()], dim=0).unsqueeze()
+                x_list.append(patient_representation)
+            x = torch.cat(x_list, dim=0)
+        outputs = self.head_net(x)
+        return outputs
