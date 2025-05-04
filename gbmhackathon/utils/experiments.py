@@ -5,6 +5,7 @@ import os
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+from flatten_dict import flatten, unflatten
 
 
 class training_experiment : 
@@ -81,13 +82,53 @@ class training_experiment :
              
              
 
-             
+class model_comparisons : 
 
-             
+    def __init__(self, config, overrides : dict) :
+        """
+        overrides should be a dictionary with the format "overrides_name : dict"
+        """
+        self.original_config=config
+        self.overrided_config=self.instantiate_overrides_config(overrides)
 
-             
-             
 
+
+
+    def instantiate_overrides_config(self,overrides) :    
+    
+        assert type(overrides)==dict
+        overrided_config=dict()
+
+        for conf_name,conf in overrides.items() : 
+             
+            flatten_overr=flatten(conf,reducer='dot')
+            original_flatten=flatten(self.original_config,reducer='dot')
+
+            for overr_key,value in flatten_overr.items(): 
+                 
+                 assert (overr_key in original_flatten.keys()), "overrides keys not recognized"
+                 original_flatten[overr_key]=value
+
+                 overrided_config[conf_name]=unflatten(original_flatten,splitter="dot")
+
+        return overrided_config
+    
+
+    def test_rapidos(self) : 
+         
+         for override,config in self.overrided_config.items(): 
+              print("override {}!!! ".format(override))
+              wahou=global_wrapper.MME_Global(config)
+              wahou.fit_mme()
+
+
+
+
+
+
+     
+     
+        
 
         
 
