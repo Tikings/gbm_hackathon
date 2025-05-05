@@ -50,11 +50,11 @@
                                                 },
 
                                         "spatial_cfg" : 
-                                        {"net_type": "graph",
-                                        "net_config": null}
+                                                                {"net_type": "graph",
+                                                                "net_config": null},
 
 
-                                        },
+                                        
                                         "wes_cfg" : 
                                         {
                                                 "net_type": "attention",
@@ -117,6 +117,8 @@
                                                         }
 
                                 }
+                        
+                        }
                 
         },
 

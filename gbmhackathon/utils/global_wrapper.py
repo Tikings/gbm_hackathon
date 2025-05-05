@@ -291,10 +291,10 @@ class MME_Global :
         """
 
 
-        for key in self.config["MME_Model"]["architecture"]["MME"].keys(): 
+        for key in list(self.config["MME_Model"]["architecture"]["MME"].keys()): 
             value = self.config["MME_Model"]["architecture"]["MME"][key] ## On peut pas itérer avec items() puisquele dictionnaire peut changer de taille  
             
-            if key not in self.config["MME_Model"]["modalities_data"]["modalities"].keys(): 
+            if key.split("_")[0] not in self.config["MME_Model"]["modalities_data"]["modalities"].keys(): 
                 del self.config["MME_Model"]["architecture"]["MME"][key]
                 continue ### Pour éviter d'utiliser cette modalité dans la suite si on l'a pas inséré dans les data
 
