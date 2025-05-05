@@ -291,11 +291,12 @@ class MME_Global :
         """
 
 
-        for key, value in self.config["MME_Model"]["architecture"]["MME"].items() : 
+        for key in self.config["MME_Model"]["architecture"]["MME"].keys(): 
+            value = self.config["MME_Model"]["architecture"]["MME"][key] ## On peut pas itérer avec items() puisquele dictionnaire peut changer de taille  
             
             if key not in self.config["MME_Model"]["modalities_data"]["modalities"].keys(): 
                 del self.config["MME_Model"]["architecture"]["MME"][key]
-                continue
+                continue ### Pour éviter d'utiliser cette modalité dans la suite si on l'a pas inséré dans les data
 
 
             if self.config["MME_Model"]["architecture"]["MME"][key]["net_type"] == 'mlp' :
