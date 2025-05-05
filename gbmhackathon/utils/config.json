@@ -40,7 +40,7 @@
                                                 {
                                                         "net_type": "mlp",
                                                         "net_config": {
-                                                                        "layers": [1024, 512, 64],
+                                                                        "layers": [1536, 512, 64],
                                                                         "dropout": 0.65,
                                                                         "act_fn": "torch.nn.ReLU",
                                                                         "norm_layer": "torch.nn.LayerNorm"
@@ -75,7 +75,7 @@
                                         "clinical_cfg" : {  
                                                 "net_type": "mlp",
                                                 "net_config": {
-                                                                        "layers": [1024, 512, 64],
+                                                                        "layers": [12, 10, 64],
                                                                         "dropout": 0.65,
                                                                         "act_fn": "torch.nn.ReLU",
                                                                         "norm_layer": "torch.nn.LayerNorm"
