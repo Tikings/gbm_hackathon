@@ -293,13 +293,13 @@ class MME_Global :
 
         for key, value in self.config["MME_Model"]["architecture"]["MME"].items() : 
 
-            if key == 'mlp' : 
-                    module_name,act_funct_name=value["net_config"]["act_fn"].split["."]
+            if self.config["MME_Model"]["architecture"]["MME"][key]["net_type"] == 'mlp' :
+                    module_name,act_funct_name=value["net_config"]["act_fn"].split(".")
                     module = __import__(module_name, fromlist=[act_funct_name])
                     self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]=getattr(module, act_funct_name)
 
 
-                    module_name,normlayer_name=value["norm_layer"].split["."]
+                    module_name,normlayer_name=value["norm_layer"].split(".")
                     module = __import__(module_name, fromlist=[normlayer_name])
                     self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"]=getattr(module, normlayer_name)
             
