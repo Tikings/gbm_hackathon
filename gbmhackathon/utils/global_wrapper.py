@@ -32,12 +32,12 @@ class MME_Global :
 
 
         self.config=config
-        self.__format_config()
-        self.__verify_config()
+       
         self.save_output=save
         if self.save_output :
             self.__setup_output_folder()
-
+        self.__format_config()
+        self.__verify_config()
         self.device=self.config["global_settings"]["device"]
         
         
@@ -292,20 +292,25 @@ class MME_Global :
 
 
         for key, value in self.config["MME_Model"]["architecture"]["MME"].items() : 
+            
+            if key not in self.config["MME_Model"]["modalities_data"]["modalities"].keys(): 
+                del self.config["MME_Model"]["architecture"]["MME"][key]
+                continue
+
 
             if self.config["MME_Model"]["architecture"]["MME"][key]["net_type"] == 'mlp' :
-                    module_name,act_funct_name=value["net_config"]["act_fn"].split(".")
+                    module_name,act_funct_name=value["net_config"]["act_fn"].rsplit(".",1)
                     module = __import__(module_name, fromlist=[act_funct_name])
                     self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]=getattr(module, act_funct_name)
 
 
-                    module_name,normlayer_name=value["norm_layer"].split(".")
+                    module_name,normlayer_name=value["net_config"]["norm_layer"].rsplit(".",1)
                     module = __import__(module_name, fromlist=[normlayer_name])
                     self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"]=getattr(module, normlayer_name)
             
             self.config["MME_Model"]["architecture"]["MME"][key]["device"]=self.config["global_settings"]["device"]
 
-
+ 
 
     
 
