@@ -96,9 +96,9 @@ class model_comparisons :
         overrides should be a dictionary with the format "overrides_name : dict"
         """
         self.original_config=config
-        self.__setup_output_folder()
+        
         self.overrided_config=self.instantiate_overrides_config(overrides)
-
+        self.__setup_output_folder()
 
 
 
@@ -125,7 +125,9 @@ class model_comparisons :
     def test_rapidos(self) : 
          
         for override,config in self.overrided_config.items(): 
-              config["global_settings"]["output_dir"]=os.path.join(config["global_settings"]["output_dir"],override)
+              config["global_settings"]["output_dir"]=os.path.join(self.experiment_dir,override)
+              os.makedirs(os.path.join(config["global_settings"]["output_dir"],override))
+
               exp=training_experiment(config=config)
               exp.Multiple_run_experiment()
               avg_loss=dict()
@@ -139,9 +141,8 @@ class model_comparisons :
             tab=avg_loss[conf]
             if tab.shape[0] < max_avg_len : 
                 tab=np.hstack((tab,np.full((max_avg_len-tab.shape[0]),fill_value=np.nan)))
-            
+           
             plt.plot(range(1, max_avg_len+1), tab, linewidth=1, label=" config : {}".format(conf))
-        
         plt.savefig(os.path.join(self.experiment_dir,"comparison_loss.pdf"),dpi=1000)
 
 

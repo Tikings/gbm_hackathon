@@ -16,6 +16,7 @@ import os
 from datetime import datetime
 import json
 import pickle as pkl 
+import torch.nn as nn
 
 
 
@@ -31,11 +32,14 @@ class MME_Global :
 
 
         self.config=config
+        self.__format_config()
+        self.__verify_config()
         self.save_output=save
         if self.save_output :
             self.__setup_output_folder()
 
         self.device=self.config["global_settings"]["device"]
+        
         
         self.dataset = PatientLearningDataset(self.config["MME_Model"]["modalities_data"]["modalities"], self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"], device=self.device)
         self.dataloader = DataLoader(self.dataset, self.config["MME_Model"]["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator(device=self.dataset.device))
@@ -46,30 +50,30 @@ class MME_Global :
         self.id2sample=self.dataset.ind2patient
         self.patient2id=self.__get_id2patient()
 
-        self.input_size_dict=self.__get_InputSize()
+        self.input_size_dict=self.__get_InputSize() ### Voir pour modifier automatiquement les input size donnés en config
 
         ##### ICI,certainement modifier les classes 
         self.available_modalities=self.__get_available_modalities()
         assert len(self.available_modalities)>0, '0 modality detected, weird'
-        self.mme_cfg=dict()
+        self.mme_cfg=self.config["MME_Model"]["architecture"]["MME"]
         
-        if "hne" in self.available_modalities : 
-            hne_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["hne"])
-            self.mme_cfg["hne_cfg"]=hne_cfg
+        # if "hne" in self.available_modalities : 
+        #     hne_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["hne"])
+        #     self.mme_cfg["hne_cfg"]=hne_cfg
 
-        if "spatial" in self.available_modalities : 
-             spatial_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["spatial"])
-             self.mme_cfg["spatial_cfg"]=spatial_cfg
-        if "clinical" in self.available_modalities : 
-            clinical_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
-            self.mme_cfg["clinical_cfg"]=clinical_cfg
+        # if "spatial" in self.available_modalities : 
+        #      spatial_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["spatial"])
+        #      self.mme_cfg["spatial_cfg"]=spatial_cfg
+        # if "clinical" in self.available_modalities : 
+        #     clinical_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["small_capacity_cfg"], self.input_size_dict["clinical"])
+        #     self.mme_cfg["clinical_cfg"]=clinical_cfg
         
-        if "wes" in self.available_modalities : 
-            wes_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
-            self.mme_cfg["wes_cfg"]=wes_cfg
+        # if "wes" in self.available_modalities : 
+        #     wes_cfg = self.__adaptBaseConfig(self.config["MME_Model"]["architecture"]["mid_capacity_cfg"], self.input_size_dict["wes"])
+        #     self.mme_cfg["wes_cfg"]=wes_cfg
         
        
-        self.__replace_instance_modality_cfg()
+        # self.__replace_instance_modality_cfg()
 
         self.mme=MultiModalEncoder(**self.mme_cfg).to(self.device)
         self.trained=False
@@ -153,7 +157,7 @@ class MME_Global :
 
     def __save_model(self,name: str= None): 
         
-        assert (self.trained==True), "The model should be saved before saving, but it is not "
+        assert (self.trained==True), "The model should be trained before saving, but it is not "
         if name is None : 
             name="mme_model.pt"
         self.path_model=os.path.join(self.experiment_dir,name)
@@ -278,14 +282,43 @@ class MME_Global :
                 list_modalities.append(modality)
 
         return list_modalities
+    
+
+
+    def __format_config(self) : 
+        """
+        Because some things needs to be formated (ex : function call from string)
+        """
+
+
+        for key, value in self.config["MME_Model"]["architecture"]["MME"].items() : 
+
+            if key == 'mlp' : 
+                    module_name,act_funct_name=value["net_config"]["act_fn"].split["."]
+                    module = __import__(module_name, fromlist=[act_funct_name])
+                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]=getattr(module, act_funct_name)
+
+
+                    module_name,normlayer_name=value["norm_layer"].split["."]
+                    module = __import__(module_name, fromlist=[normlayer_name])
+                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"]=getattr(module, normlayer_name)
+            
+            self.config["MME_Model"]["architecture"]["MME"][key]["device"]=self.config["global_settings"]["device"]
+
+
+
+    
+
+
     def __verify_config(self): 
         """
         verify here whatever you want on config
+        IMPLEMENTER TOUTES LES VERIFS NECESSAIRES 
         """
 
+        
 
-
-        pass
+        
     
     
 
