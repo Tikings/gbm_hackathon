@@ -59,7 +59,7 @@
                                         {
                                                 "net_type": "attention",
                                                 "net_config" :  {
-                                                                        "dim": 64,              
+                                                                        "dim": 1790,              
                                                                         "depth": 4,             
                                                                         "num_heads": 8,
                                                                         "mlp_ratio": 4.0,       
