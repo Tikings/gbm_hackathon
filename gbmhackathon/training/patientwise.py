@@ -69,6 +69,9 @@ class PatientLearningDataset(Dataset):
         if self.dropout:
             self.augment_dataset()
 
+        self.inputs = []
+        self.store_all()
+        
     def _load_pickle(self, root, folder_name,  emb_name):
         path = str(root + "/" + folder_name + "/" + emb_name)
         dict_patient = load_s3(path)
@@ -84,28 +87,26 @@ class PatientLearningDataset(Dataset):
                 new_dict[new_key] = value
         return new_dict
 
-    def __len__(self):
-        return len(self.ind2patient)
-
-    def __getitem__(self, idx):
-        dict_patient = {}
-        list_available = []
-        patient = self.ind2patient[idx]
-        for key in self.dict_emb.keys() :
-            if patient in self.dict_emb[key].keys():
-                dict_patient[key] = self.dict_emb[key][patient]
-                list_available.append(1)
-            else :
-                dict_patient[key] = torch.zeros(self.size_emb[key])
-                list_available.append(0)
-        return patient, dict_patient, torch.Tensor(list_available).to(torch.int8), self.device
+    def store_all(self):
+        for idx in self.ind2patient.keys():
+            dict_patient = {}
+            list_available = []
+            patient = self.ind2patient[idx]
+            for key in self.dict_emb.keys() :
+                if patient in self.dict_emb[key].keys():
+                    dict_patient[key] = self.dict_emb[key][patient]
+                    list_available.append(1)
+                else :
+                    dict_patient[key] = torch.zeros(self.size_emb[key])
+                    list_available.append(0)
+            self.inputs.append(tuple([patient, dict_patient, torch.Tensor(list_available).to(torch.int8), self.device]))
 
     def augment_dataset(self):
         all_ids = list(self.ind2patient.keys())
         last_idx = all_ids[-1]
         new_idx = last_idx + 1
         for pidx in all_ids:
-            patient, patient_mod_dict, available_mod_tensor, _ = self.__getitem__(pidx)
+            patient, patient_mod_dict, available_mod_tensor, _ = self.getitem(pidx)
             modalities = patient_mod_dict.keys()
             if available_mod_tensor.sum() < len(modalities):
                 patient_non_missing_modalities = [mod for mod_i,mod in enumerate(modalities) if available_mod_tensor[mod_i] == 1]
@@ -125,7 +126,7 @@ class PatientLearningDataset(Dataset):
                     augmented_dict = deepcopy(patient_mod_dict)
     
                     # new id to identify augmented samples
-                    augmented_patient_id = f"{patient}_d{''.join(knockout_mods)}"
+                    augmented_patient_id = f"{patient}_d{'_'.join(knockout_mods)}"
                     # print(f"Augmented ID: {augmented_patient_id}")
                     self.ind2patient[new_idx] = augmented_patient_id
                     new_idx += 1
@@ -133,6 +134,25 @@ class PatientLearningDataset(Dataset):
                         # If we do not add the knockout mods, they will be treted as missing by __getitem__
                         if mod not in knockout_mods and mod not in patient_missing_modalities: 
                             self.dict_emb[mod][augmented_patient_id] = augmented_dict[mod]
+                            
+    def __len__(self):
+        return len(self.ind2patient)
+        
+    def getitem(self, idx):
+        dict_patient = {}
+        list_available = []
+        patient = self.ind2patient[idx]
+        for key in self.dict_emb.keys() :
+            if patient in self.dict_emb[key].keys():
+                dict_patient[key] = self.dict_emb[key][patient]
+                list_available.append(1)
+            else :
+                dict_patient[key] = torch.zeros(self.size_emb[key])
+                list_available.append(0)
+        return patient, dict_patient, torch.Tensor(list_available).to(torch.int8), self.device
+        
+    def __getitem__(self, idx):
+        return self.inputs[idx]
             
 
 def batcher_graphs(
@@ -197,3 +217,53 @@ def collate_patient_wise(batch):
 
     available_mod_tensor = torch.stack(list_available).type(torch.float32)
     return list_patient, modalities, dict_batched, available_mod_tensor
+
+def collate_patient_wise_colearning(batch): 
+    list_patient = [patient[0] for patient in batch]
+    list_dict_tensor = [patient[1] for patient in batch]
+    modalities = list(list_dict_tensor[0].keys())
+
+    auxilliary_targets = []
+    for patient in list_patient:
+        if 'd' in patient:
+            patient = patient[:patient.index('_d')]
+        auxilliary_targets.append(patient)
+        
+    # Removing connectivites of spatial embeddings from modalities
+    if "connectivities" in modalities :
+        modalities.remove("connectivities")
+    
+    #print(f" Modalities available : {modalities}")
+    
+    # The order of the rows are the same as those of the dictionnary with the embeddings
+    list_available = [patient[2] for patient in batch]
+
+    # We presuppose that the device is the same for every embedding
+    device = [patient[-1] for patient in batch][0]
+    
+    dict_batched = {}
+    for mod in modalities:
+        if mod != "spatial" : 
+            mod_list = []
+            for dic in list_dict_tensor:
+                # Ensure tensor is on the correct device
+                tensor = dic[mod]
+                if tensor.device != device:
+                    tensor = tensor.to(device)
+                mod_list.append(tensor)
+            if len(mod_list[0].size()) == 2 and mod_list[0].size(0) > 1:
+                aggregate_tiles = []
+                for tensor in mod_list:
+                    # print(tensor.size())
+                    aggregate_tiles.append(tensor.mean(dim=0).squeeze())
+                    # print(tensor.mean(dim=0).squeeze().size())
+                dict_batched[mod] = torch.stack(aggregate_tiles).type(torch.float32)
+            else:
+                dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
+        else :
+            spatial_stack = [dic["spatial"] for _ in dic.keys()] #! Check the dimension
+            connectivities_stack = [dic["connectivities"] for _ in dic.keys()]
+            dict_batched["spatial"] = batcher_graphs(spatial_stack, connectivities_stack)
+
+    available_mod_tensor = torch.stack(list_available).type(torch.float32)
+    return list_patient, modalities, dict_batched, available_mod_tensor, auxilliary_targets

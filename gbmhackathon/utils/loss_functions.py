@@ -56,7 +56,7 @@ class InfoNCELoss(nn.Module):
                  temperature: float = 0.07, 
                  similarity: str = "original", 
                  use_all_positives: bool = True,
-                 eps: float = 1e-8):
+                 eps: float = 1e-7):
         """
         Args:
             temperature: Scaling factor for the similarity scores
@@ -287,38 +287,41 @@ class RegularizedInfoNCELoss(nn.Module):
         
         self.alpha = alpha
         self.eps = eps
-        self.rankme_func = RankMe()
+        # self.rankme_func = RankMe()
         
     def forward(self, batch) -> torch.Tensor:
         nce_loss = self.infonce(batch)
-        
-        out_dict, _, _ = batch
-        N = list(out_dict.values())[0].size(0)  # Number of patients
-        
-        # Stack all embeddings for vectorized computation
-        # Shape: [num_modalities, batch_size, embedding_dim]
-        all_embeddings = torch.stack([out_dict[mod].squeeze() for mod in out_dict.keys()])
-        
-        # Calculate zero-activation penalty - vectorized across all modalities and patients
-        # Shape after comparison: [num_modalities, batch_size, embedding_dim]
-        zero_mask = (all_embeddings.abs() <= self.eps)
-        
-        # Count zeros for each modality-patient pair and normalize by embedding size
-        # Shape: [num_modalities, batch_size]  
-        embedding_sizes = torch.tensor([all_embeddings.shape[2]] * all_embeddings.shape[0], 
-                                      device=all_embeddings.device)[:, None]
-        zero_ratios = zero_mask.sum(dim=2) / embedding_sizes
-        
-        # Calculate L2 norms - vectorized across all modalities and patients
-        # Shape: [num_modalities, batch_size]
-        norm_penalties = torch.norm(all_embeddings, p=2, dim=2)
-
-        zero_ratios_per_mod = zero_ratios.t().mean(dim=0)
-        # print(zero_ratios_per_mod)
-        # Combine penalties (sum of zero ratio and norm penalty)
-        # Shape: [num_modalities, batch_size]
-        combined_penalties = zero_ratios + zero_ratios_per_mod.sum() - norm_penalties
-        torch.clamp(combined_penalties, max=100)
-        reg_loss = combined_penalties.sum()
+        print(nce_loss)
+        if self.alpha != 0:
+            out_dict, _, _ = batch
+            N = list(out_dict.values())[0].size(0)  # Number of patients
+            
+            # Stack all embeddings for vectorized computation
+            # Shape: [num_modalities, batch_size, embedding_dim]
+            all_embeddings = torch.stack([out_dict[mod].squeeze() for mod in out_dict.keys()])
+            
+            # Calculate zero-activation penalty - vectorized across all modalities and patients
+            # Shape after comparison: [num_modalities, batch_size, embedding_dim]
+            zero_mask = (all_embeddings.abs() <= self.eps)
+            
+            # Count zeros for each modality-patient pair and normalize by embedding size
+            # Shape: [num_modalities, batch_size]  
+            embedding_sizes = torch.tensor([all_embeddings.shape[2]] * all_embeddings.shape[0], 
+                                          device=all_embeddings.device)[:, None]
+            zero_ratios = zero_mask.sum(dim=2) / embedding_sizes
+            
+            # Calculate L2 norms - vectorized across all modalities and patients
+            # Shape: [num_modalities, batch_size]
+            norm_penalties = torch.norm(all_embeddings, p=2, dim=2)
     
-        return self.smoothing_func(nce_loss - self.alpha * reg_loss)
+            zero_ratios_per_mod = zero_ratios.t().mean(dim=0)
+            # print(zero_ratios_per_mod)
+            # Combine penalties (sum of zero ratio and norm penalty)
+            # Shape: [num_modalities, batch_size]
+            combined_penalties = zero_ratios + zero_ratios_per_mod.sum() - norm_penalties
+            # torch.clamp(combined_penalties, max=100)
+            reg_loss = combined_penalties.sum()
+    
+            return self.smoothing_func(nce_loss - self.alpha * reg_loss)
+        return self.smoothing_func(nce_loss)
+            

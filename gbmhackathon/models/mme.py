@@ -10,7 +10,19 @@ from torch.nn.parallel import parallel_apply
 
 from gbmhackathon.utils.module_functions import instantiate
 
-
+# Helper functions
+def remove_field(cfg: Dict, flag: Union[str,List[str]]) -> Dict:
+    match flag:
+        case str():
+            if flag not in cfg.keys():
+                raise KeyError(f"Key {flag} not in dict keys: {cfg.keys()}")
+            return {key:value for key, value in cfg.items() if key != flag}
+        case list():
+            for f in flag:
+                if f not in cfg.keys():
+                    raise KeyError(f"Key {f} not in dict keys: {cfg.keys()}")
+            return {key:value for key, value in cfg.items() if key not in flag}
+    
 def correct_float_int(layer_list: List):
     """Identify ints which were passed as floating numbers"""
     layers = []
@@ -75,8 +87,36 @@ class MLP(nn.Module):
         dropout: List[float] | float,
         act_fn: List[Callable | None] | Callable | None,
         norm_layer: List[Callable | None] | Callable | None,
+        enable_residuals: bool = True,
     ):
+        """
+        Parameters:
+        -----------
+        layers : List[int]
+            A sequence of layer sizes, including input and output dimensions.
+            e.g. [in_dim, hidden1, hidden2, ..., out_dim]
+
+        dropout : float or List[float]
+            Dropout probability (0–1) applied after each hidden Linear layer.
+            If a single float is given, the same rate is used everywhere;
+            if a list, its length should match the number of hidden layers.
+
+        act_fn : Callable or List[Callable or None]
+            Activation function(s) to insert after each hidden layer.
+            Can be a single callable (e.g. nn.ReLU) or a list of the same length
+            as the hidden layers, with None to skip activation at specific layers.
+
+        norm_layer : Callable or List[Callable or None]
+            Normalization layer(s) to apply after activation.
+            Accepts a layer constructor (e.g. nn.LayerNorm) or a matching list
+            (with None entries to skip normalization).
+
+        enable_residuals : bool (default: True)
+            If True, automatically add skip‑connections between any two Linear layers
+            that share the same dimensionality to help gradient flow.
+        """
         super().__init__()
+        
         self.layers_arg = layers
         self.dropout_arg = dropout
         self.act_fn_arg = act_fn
@@ -121,16 +161,37 @@ class MLP(nn.Module):
                         module_list.append(norm_layer(layer_size))
 
         self.network_layers = module_list
-
         # weights and biases are initialized vy defaults, using appropriate initialize methods.
         # That's why we dont manually do it
 
+        self.enable_residuals = enable_residuals
+        if self.enable_residuals:
+            uniques, counts = np.unique(self.layers_arg, return_counts=True)
+            self.potential_res_dims: list = list(uniques[counts > 1])
+
+        if len(self.potential_res_dims) < 1:
+            self.enable_residuals = False
+            print("No potential residual connections found")
+
     def forward(self, x):
-        for layer in self.network_layers:
-            # if isinstance(layer, nn.Linear):
-            #     print(layer.weight.device, layer.bias.device)
-            #     print(x.device)
-            x = layer(x)
+        if self.enable_residuals:
+            possible_residuals = []
+            res_dim_idx = 0
+            for layer in self.network_layers:
+                if isinstance(layer, nn.Linear):
+                    if x.size(1) in self.potential_res_dims:
+                        res_dim_idx = self.potential_res_dims.index(x.size(1))
+                        if len(possible_residuals) > res_dim_idx:
+                            x = x + possible_residuals[res_dim_idx]
+                        else:
+                            possible_residuals.append(x)
+                x = layer(x)
+        else:
+            for layer in self.network_layers:
+                # if isinstance(layer, nn.Linear):
+                #     print(layer.weight.device, layer.bias.device)
+                #     print(x.device)
+                x = layer(x)
         return x
 
     def validate_params(self):
@@ -193,6 +254,177 @@ class MLP(nn.Module):
             )
 
 
+class DropPath(nn.Module):
+    def __init__(self, drop_prob: float = 0.0):
+        super().__init__()
+        self.drop_prob = drop_prob
+
+    def forward(self, x):
+        if not self.training or self.drop_prob == 0.0:
+            return x
+        keep_prob = 1 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        mask = x.new_empty(shape).bernoulli_(keep_prob)
+        return x.div(keep_prob) * mask
+
+class GEGLU(nn.Module):
+    def forward(self, x):
+        x, gate = x.chunk(2, dim=-1)
+        return x * F.gelu(gate)
+
+class AttentionBlock(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        qkv_bias: bool = True,
+        attn_dropout: float = 0.0,
+        proj_dropout: float = 0.0,
+        drop_path: float = 0.0,
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_dropout)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_dropout)
+
+        self.norm = nn.LayerNorm(dim)
+        self.drop_path = DropPath(drop_path)
+
+    def forward(self, x):
+        # Pre-norm
+        x_norm = self.norm(x)
+        B, N, C = x_norm.shape
+
+        # QKV and split heads
+        qkv = self.qkv(x_norm).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        q, k, v = qkv.unbind(dim=2)  # each shape (B, N, H, head_dim)
+
+        # Scaled dot-product attention
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        # Aggregate and project
+        out = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        out = self.proj(out)
+        out = self.proj_drop(out)
+
+        # Residual + DropPath
+        return x + self.drop_path(out)
+
+class FeedForward(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        hidden_dim: int,
+        dropout: float = 0.0,
+        drop_path: float = 0.0,
+    ):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fc1 = nn.Linear(dim, hidden_dim * 2)
+        self.act = GEGLU()
+        self.fc2 = nn.Linear(hidden_dim, dim)
+        self.drop = nn.Dropout(dropout)
+        self.drop_path = DropPath(drop_path)
+
+    def forward(self, x):
+        x_norm = self.norm(x)
+        x_ff = self.fc1(x_norm)
+        x_ff = self.act(x_ff)
+        x_ff = self.fc2(x_ff)
+        x_ff = self.drop(x_ff)
+        return x + self.drop_path(x_ff)
+
+class AttentionNetwork(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim: int,
+        depth: int,
+        num_heads: int,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = True,
+        attn_dropout: float = 0.0,
+        proj_dropout: float = 0.0,
+        mlp_dropout: float = 0.0,
+        drop_path_rate: float = 0.1,
+    ):
+        """
+        Parameters:
+        -----------
+        dim : int
+            Dimensionality of the input and output features.
+
+        depth : int
+            Number of sequential Transformer-style attention blocks.
+
+        num_heads : int
+            Number of attention heads in each MultiHeadAttention block.
+
+        mlp_ratio : float (default: 4.0)
+            Expansion ratio for the hidden layer size in the MLP block relative to the input dimension.
+            For example, if `dim=64` and `mlp_ratio=4.0`, the hidden layer in the MLP will have 64 * 4 = 256 units.
+
+        qkv_bias : bool (default: True)
+            If True, enables learnable bias for query, key, and value projections.
+
+        attn_dropout : float (default: 0.0)
+            Dropout applied to attention weights.
+
+        proj_dropout : float (default: 0.0)
+            Dropout applied after the output projection of the attention block.
+
+        mlp_dropout : float (default: 0.0)
+            Dropout applied after the activation in the MLP block.
+
+        drop_path_rate : float (default: 0.1)
+            Drop path probability used for stochastic depth regularization.
+        """
+        super().__init__()
+        # stochastic depth scheduling
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+
+        # build layers
+        self.blocks = nn.ModuleList()
+        for i in range(depth):
+            self.blocks.append(
+                nn.ModuleList([
+                    AttentionBlock(
+                        dim=dim,
+                        num_heads=num_heads,
+                        qkv_bias=qkv_bias,
+                        attn_dropout=attn_dropout,
+                        proj_dropout=proj_dropout,
+                        drop_path=dpr[i],
+                    ),
+                    FeedForward(
+                        dim=dim,
+                        hidden_dim=int(dim * mlp_ratio),
+                        dropout=mlp_dropout,
+                        drop_path=dpr[i],
+                    ),
+                ])
+            )
+
+        # final normalization
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, x: torch.Tensor):
+        """
+        Args:
+            x: input tensor of shape [B, N, dim]  (batch, tokens, features)
+        """
+        for attn, ff in self.blocks:
+            x = attn(x)
+            x = ff(x)
+        return self.norm(x)
+        
 class GraphEncoder(nn.Module):
     def __init__(self,
                 in_channels : int,
@@ -204,7 +436,34 @@ class GraphEncoder(nn.Module):
                 att_agg_activation : Callable = nn.ReLU,
                 heads : int = 1,
                 ):
-        super(GraphEncoder, self).__init__()
+        """
+        Parameters:
+        -----------
+        in_channels : int
+            Number of input features per node.
+
+        hidden_channels : int
+            Number of hidden features in the GAT layer (per head).
+
+        out_channels : int
+            Number of output features for the final representation.
+
+        dropout : float
+            Dropout probability applied after the GAT activation.
+
+        mean_pool : bool (default: False)
+            If True, use global mean pooling; otherwise, use attention-based pooling.
+
+        activation_post_gat : Callable (default: F.relu)
+            Activation function applied after the GAT layer.
+
+        att_agg_activation : Callable (default: nn.ReLU)
+            Activation function used inside the attention gate MLP for pooling.
+
+        heads : int (default: 1)
+            Number of attention heads in the GAT layer.
+        """
+        super().__init__()
 
         self.gat = GATConv(in_channels, hidden_channels, heads=heads, concat=True)
         self.dropout = nn.Dropout(dropout)
@@ -230,8 +489,68 @@ class GraphEncoder(nn.Module):
 
         return x
 
+# class ModalityEncoder(nn.Module):
+#     """Defines a unified module for all Encoders."""
+
+#     def __init__(
+#         self,
+#         layers: List[int],
+#         dropout: List[float] | float,
+#         act_fn: List[Callable | None] | Callable | None,
+#         norm_layer: List[Callable | None] | Callable | None,
+#         enable_residuals: bool = True,
+#         device: Optional[Union[str, torch.device]] = None,
+#     ):
+#         super().__init__()
+#         # Handle device selection - use CUDA if available, otherwise CPU
+#         if device is None:
+#             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#         else:
+#             self.device = torch.device(device)
+        
+#         print(f"Using device: {self.device}")
+        
+#         self.mlp: nn.Module = MLP(layers, dropout, act_fn, norm_layer, enable_residuals).to(self.device)
+#     def forward(self, x):
+#         return self.mlp(x)
+
+
+    
 class ModalityEncoder(nn.Module):
     """Defines a unified module for all Encoders."""
+
+    def __init__(
+        self,
+        config: Dict,
+    ):
+        super().__init__()
+        # Handle device selection - use CUDA if available, otherwise CPU
+        device: Union[str, torch.device] = config["device"] if "device" in config.keys() else None
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+        
+        print(f"Using device: {self.device}")
+        
+        self.net_type: str = config["net_type"]
+        self.config = config
+        self.net_config = self.config["net_config"]
+        
+        if self.net_type == "mlp":
+            self.net: nn.Module = instantiate(self.net_config, MLP).to(self.device)
+        elif self.net_type == "attention":
+            self.net: nn.Module = instantiate(self.net_config, AttentionNetwork).to(self.device)
+        elif self.net_type == "graph":
+            self.net: nn.Module = instantiate(self.net_config, GraphEncoder).to(self.device)
+        else:
+            raise ValueError(f"Wrong 'net_type' argument value. Got {self.net_type} but must be either 'attention' or 'mlp' or 'graph'")
+            
+    def forward(self, x):
+        return self.net(x)
+
+class AuxilliaryClassifier(nn.Module):
+    """Defines a unified module for auxilliary classifiers."""
 
     def __init__(
         self,
@@ -250,7 +569,7 @@ class ModalityEncoder(nn.Module):
         
         print(f"Using device: {self.device}")
         
-        self.mlp: nn.Module = MLP(layers, dropout, act_fn, norm_layer)
+        self.mlp: nn.Module = MLP(layers, dropout, act_fn, norm_layer).to(self.device)
     def forward(self, x):
         return self.mlp(x)
 
@@ -279,27 +598,33 @@ class MultiModalEncoder(nn.Module):
         self.modality_net_map = nn.ModuleDict()
         # Instantiate architecture
         if self.hne_cfg is not None:
-            self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
+            # self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
+            self.hne_net = ModalityEncoder(config=self.hne_cfg)
             self.modality_net_map["hne"] = self.hne_net
             
         if self.spatial_cfg is not None:
-            self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
+            # self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
+            self.spatial_net = ModalityEncoder(config=self.spatial_cfg)
             self.modality_net_map["spatial"] = self.spatial_net
             
         if self.sc_cfg is not None:
-            self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
+            # self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
+            self.sc_net = ModalityEncoder(config=self.sc_cfg)
             self.modality_net_map["scRNA"] = self.sc_net
             
         if self.bulk_cfg is not None:
-            self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
+            # self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
+            self.bulk_net = ModalityEncoder(config=self.bulk_cfg)
             self.modality_net_map["bulk"] = self.bulk_net
             
         if self.wes_cfg is not None:
-            self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
+            # self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
+            self.wes_net = ModalityEncoder(config=self.wes_cfg)
             self.modality_net_map["wes"] = self.wes_net
             
         if self.clinical_cfg is not None:
-            self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
+            # self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
+            self.clinical_net = ModalityEncoder(config=self.clinical_cfg)
             self.modality_net_map["clinical"] = self.clinical_net
 
     def forward(self, x: Dict[str, torch.Tensor]):
