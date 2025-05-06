@@ -1,12 +1,7 @@
-
-
-
-
-
-
 from gbmhackathon.training.patientwise import *
 from gbmhackathon.models.mme import MultiModalEncoder
 from gbmhackathon.utils.loss_functions import InfoNCELoss, RegularizedInfoNCELoss, SmoothingFunction
+from gbmhackathon.utils.module_functions import instantiate
 from gbmhackathon.s3_loader import load_s3
 from copy import deepcopy
 from torch.utils.data import DataLoader
@@ -89,10 +84,12 @@ class MME_Global :
         problematic_batch_patient_ids = []
         
         mme = self.mme
-        mme = torch.jit.script(mme)
+        # mme = torch.jit.script(mme)
 
-        loss_fn = RegularizedInfoNCELoss(list(self.config["MME_Model"]["modalities_data"]["modalities"].keys()),
-                                        self.patient2id, **self.config["MME_Model"]["training"]["InfoNCE_Loss"])
+        regularized_loss_cfg = {"modalities":list(self.config["MME_Model"]["modalities_data"]["modalities"].keys()),
+                                "patient_map":self.patient2id}
+        regularized_loss_cfg.update(self.config["MME_Model"]["training"]["InfoNCE_Loss"])
+        loss_fn = instantiate(regularized_loss_cfg, RegularizedInfoNCELoss)
         optimizer = Adam(
             mme.parameters(),
             lr=1e-3,
@@ -263,7 +260,7 @@ class MME_Global :
         output_folder=self.config["global_settings"]["output_dir"]
         assert os.path.exists(output_folder), "The output folder specified does not exist"
 
-        name_folder="experiment_{}".format(datetime.now().strftime("%Y-%m-%d_%H-%M"))
+        name_folder="experiment_{}".format(datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
 
         os.makedirs(os.path.join(output_folder,name_folder))
         

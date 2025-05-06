@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from torch_geometric.nn import GATConv, GlobalAttention, global_mean_pool
 from typing import List, Dict, Callable, Iterable, Any, Optional, Union
 from torch.jit import Future
+import torch.multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 from torch.nn.parallel import parallel_apply
 
 from gbmhackathon.utils.module_functions import instantiate
@@ -76,7 +78,6 @@ def check_types_list(input_list: List, type_str: str):
     assert np.all(check_func(input_list_types, check_isin_item, "int")) == True, (
         f"All elements in layers argument must be integers. At least some were not: {input_list} -> {input_list_types}"
     )
-
 
 class MLP(nn.Module):
     """Multi Layer Perceptron with dropout and normalizaiton layers that can be instantiated dynamically"""
@@ -165,9 +166,10 @@ class MLP(nn.Module):
         # That's why we dont manually do it
 
         self.enable_residuals = enable_residuals
+        self.potential_res_dims: Dict[int, int] = {0:0}
         if self.enable_residuals:
             uniques, counts = np.unique(self.layers_arg, return_counts=True)
-            self.potential_res_dims: list = list(uniques[counts > 1])
+            self.potential_res_dims: Dict[int, int] = {dim:idx for idx, dim in enumerate(list(uniques[counts > 1]))}
 
         if len(self.potential_res_dims) < 1:
             self.enable_residuals = False
@@ -175,16 +177,18 @@ class MLP(nn.Module):
 
     def forward(self, x):
         if self.enable_residuals:
-            possible_residuals = []
-            res_dim_idx = 0
+            possible_residuals: Dict[int, torch.Tensor] = {0:torch.tensor(0)} # to keep TorchScript happy
+            res_dim_idx: int = 0
             for layer in self.network_layers:
                 if isinstance(layer, nn.Linear):
                     if x.size(1) in self.potential_res_dims:
-                        res_dim_idx = self.potential_res_dims.index(x.size(1))
+                        res_dim_idx = self.potential_res_dims[x.size(1)] # get index of the dimension
                         if len(possible_residuals) > res_dim_idx:
                             x = x + possible_residuals[res_dim_idx]
+                        elif possible_residuals == {0:0}:
+                            possible_residuals = {len(possible_residuals)-1:x}
                         else:
-                            possible_residuals.append(x)
+                            possible_residuals.update({len(possible_residuals)-1:x}) # add idx/tensor pair
                 x = layer(x)
         else:
             for layer in self.network_layers:
@@ -298,10 +302,14 @@ class AttentionBlock(nn.Module):
     def forward(self, x):
         # Pre-norm
         x_norm = self.norm(x)
-        B, N, C = x_norm.shape
+        try:
+            B, N, C = x_norm.shape
+        except:
+            B, N = x_norm.shape
+            C = 1
 
         # QKV and split heads
-        qkv = self.qkv(x_norm).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        qkv = self.qkv(x_norm).reshape(B, N, 3, self.num_heads, C // self.num_heads + 1)
         q, k, v = qkv.unbind(dim=2)  # each shape (B, N, H, head_dim)
 
         # Scaled dot-product attention
@@ -533,7 +541,7 @@ class ModalityEncoder(nn.Module):
         
         print(f"Using device: {self.device}")
         
-        self.net_type: str = config["net_type"]
+        self.net_type = config["net_type"]
         self.config = config
         self.net_config = self.config["net_config"]
         
@@ -573,7 +581,7 @@ class AuxilliaryClassifier(nn.Module):
     def forward(self, x):
         return self.mlp(x)
 
-
+    
 class MultiModalEncoder(nn.Module):
     """Global encoder that encompasses all 6 modalities"""
 
@@ -637,7 +645,7 @@ class MultiModalEncoder(nn.Module):
             outputs[name] = torch.jit.wait(fut)
 
         return outputs
-
+        
 class GBMNet(nn.Module):
     """Global model to learn predictive tasks"""
 

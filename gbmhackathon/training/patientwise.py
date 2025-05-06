@@ -6,7 +6,8 @@ from gbmhackathon.s3_loader import load_s3
 from pathlib import Path
 from torch.utils.data import Dataset
 import torch
-import re
+import re, gc
+import random as rd
 from typing import List, Dict, Optional, Union
 from copy import deepcopy
 from itertools import product
@@ -20,11 +21,12 @@ class PatientLearningDataset(Dataset):
                  folder_name : str,
                  root_s3 : Path = ABSTRA_PROJECT_STORAGE_BUCKET, 
                  device: Optional[Union[str, torch.device]] = None,
-                 dropout: bool = False,
+                 dropout: float = 0,
                  ):
         self.root = root_s3
         self.name_emb = name_emb
         self.folder = folder_name
+        assert dropout <= 1 and dropout >= 0, "Dropout parameter must be between 0 and 1 (both included)"
         self.dropout = dropout
 
         # Handle device selection - use CUDA if available, otherwise CPU
@@ -66,9 +68,13 @@ class PatientLearningDataset(Dataset):
         index_patient = list(range(len(patients)))
         self.ind2patient = dict(zip(index_patient, patients))
 
-        if self.dropout:
+        if self.dropout > 0:
             self.augment_dataset()
-
+            self.filter_dropout_samples()
+            self.repair_indices()
+        else:
+            self.dataset_dropout_proportion = 0
+            
         self.inputs = []
         self.store_all()
         
@@ -103,6 +109,7 @@ class PatientLearningDataset(Dataset):
 
     def augment_dataset(self):
         all_ids = list(self.ind2patient.keys())
+        
         last_idx = all_ids[-1]
         new_idx = last_idx + 1
         for pidx in all_ids:
@@ -135,6 +142,31 @@ class PatientLearningDataset(Dataset):
                         if mod not in knockout_mods and mod not in patient_missing_modalities: 
                             self.dict_emb[mod][augmented_patient_id] = augmented_dict[mod]
                             
+    def filter_dropout_samples(self):
+        new_ids = [id for id in list(self.ind2patient.keys()) if 'd' in self.ind2patient[id]]
+        N_all_ids = len(self.ind2patient.keys())
+        original_len = len(new_ids)
+        for id in new_ids:
+            sample_id = self.ind2patient[id]
+            if rd.random() > self.dropout:
+                for mod in self.dict_emb.keys():
+                    self.dict_emb[mod].pop(sample_id, None) # remove from modality dict (the key may or may not be there, we must use .pop(key, None) method
+                self.ind2patient.pop(id, None) # remove from id list, we know it is in the dict so we can use del
+        gc.collect()
+        new_len = len([id for id in list(self.ind2patient.keys()) if 'd' in self.ind2patient[id]])
+        new_N_all_ids = len(self.ind2patient.keys())
+        
+        print(f"By keeping {(self.dropout*100):.2f}% of dropout augmented samples we went from:")
+        print(f"{original_len} dropout samples ({(original_len*100/N_all_ids):.2f}% dropout in dataset) -- to --> {new_len} dropout samples ({new_len*100/new_N_all_ids:.2f}% dropout in dataset)")
+        self.dataset_dropout_proportion = new_len/new_N_all_ids
+
+    def repair_indices(self):
+        current_ids = [id for id in self.ind2patient.keys()]
+        correct_ids = [i for i in range(len(self.ind2patient))]
+        repair_mapping = dict(zip(current_ids, correct_ids))
+
+        self.ind2patient = {repair_mapping[id]: patient_id for id, patient_id in self.ind2patient.items()}
+        
     def __len__(self):
         return len(self.ind2patient)
         
