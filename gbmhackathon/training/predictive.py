@@ -1,5 +1,5 @@
 """
-Define all necessary functions to allow correct patient wise representation learning
+Define all necessary functions to learn downstream predictive tasks
 """
 
 from gbmhackathon.s3_loader import load_s3
@@ -15,7 +15,7 @@ from itertools import product
 ABSTRA_PROJECT_STORAGE_BUCKET = "s3://abstra-project-storage-lttemftb/1b75dc89-ad27-4a65-9e7f-877d1b4f36fc"
 PATTERN_PATIENT = "(HK_G_[0-9]{3}(a|b))"
 
-class PatientLearningDataset(Dataset):
+class PredictiveLearningDataset(Dataset):
     def __init__(self,
                  name_emb : Dict[str, str],
                  folder_name : str,

@@ -10,7 +10,7 @@ import torch.multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from torch.nn.parallel import parallel_apply
 
-from gbmhackathon.utils.module_functions import instantiate
+from gbmhackathon.utils.module_functions import instantiate, enforce_signature_types
 
 # Helper functions
 def remove_field(cfg: Dict, flag: Union[str,List[str]]) -> Dict:
@@ -81,7 +81,7 @@ def check_types_list(input_list: List, type_str: str):
 
 class MLP(nn.Module):
     """Multi Layer Perceptron with dropout and normalizaiton layers that can be instantiated dynamically"""
-
+    @enforce_signature_types
     def __init__(
         self,
         layers: List[int],
@@ -259,10 +259,12 @@ class MLP(nn.Module):
 
 
 class DropPath(nn.Module):
+    @enforce_signature_types
     def __init__(self, drop_prob: float = 0.0):
         super().__init__()
         self.drop_prob = drop_prob
-
+        self.check_args()
+        
     def forward(self, x):
         if not self.training or self.drop_prob == 0.0:
             return x
@@ -277,6 +279,7 @@ class GEGLU(nn.Module):
         return x * F.gelu(gate)
 
 class AttentionBlock(nn.Module):
+    @enforce_signature_types
     def __init__(
         self,
         dim: int,
@@ -287,11 +290,13 @@ class AttentionBlock(nn.Module):
         drop_path: float = 0.0,
     ):
         super().__init__()
+        self.dim = dim
         self.num_heads = num_heads
-        head_dim = dim // num_heads
+        head_dim = self.dim // self.num_heads
         self.scale = head_dim ** -0.5
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.qkv_bias = qkv_bias
+        self.qkv = nn.Linear(dim, dim * 3, bias=self.qkv_bias)
         self.attn_drop = nn.Dropout(attn_dropout)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_dropout)
@@ -299,6 +304,8 @@ class AttentionBlock(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.drop_path = DropPath(drop_path)
 
+        self.check_args()
+        
     def forward(self, x):
         # Pre-norm
         x_norm = self.norm(x)
@@ -326,6 +333,7 @@ class AttentionBlock(nn.Module):
         return x + self.drop_path(out)
 
 class FeedForward(nn.Module):
+    @enforce_signature_types
     def __init__(
         self,
         dim: int,
@@ -349,7 +357,9 @@ class FeedForward(nn.Module):
         x_ff = self.drop(x_ff)
         return x + self.drop_path(x_ff)
 
+        
 class AttentionNetwork(nn.Module):
+    @enforce_signature_types
     def __init__(
         self,
         *,
@@ -434,6 +444,7 @@ class AttentionNetwork(nn.Module):
         return self.norm(x)
         
 class GraphEncoder(nn.Module):
+    @enforce_signature_types
     def __init__(self,
                 in_channels : int,
                 hidden_channels : int,
@@ -526,7 +537,7 @@ class GraphEncoder(nn.Module):
     
 class ModalityEncoder(nn.Module):
     """Defines a unified module for all Encoders."""
-
+    @enforce_signature_types
     def __init__(
         self,
         config: Dict,
@@ -559,7 +570,7 @@ class ModalityEncoder(nn.Module):
 
 class AuxilliaryClassifier(nn.Module):
     """Defines a unified module for auxilliary classifiers."""
-
+    @enforce_signature_types
     def __init__(
         self,
         layers: List[int],
@@ -584,7 +595,7 @@ class AuxilliaryClassifier(nn.Module):
     
 class MultiModalEncoder(nn.Module):
     """Global encoder that encompasses all 6 modalities"""
-
+    @enforce_signature_types
     def __init__(
         self,
         hne_cfg: Dict | None = None,
@@ -635,20 +646,27 @@ class MultiModalEncoder(nn.Module):
             self.clinical_net = ModalityEncoder(config=self.clinical_cfg)
             self.modality_net_map["clinical"] = self.clinical_net
 
+    # def forward(self, x: Dict[str, torch.Tensor]):
+    #     futures: Dict[str, Future[torch.Tensor]] = {}
+    #     for name, net in self.modality_net_map.items():
+    #         futures[name] = torch.jit.fork(net, x[name])
+
+    #     outputs: Dict[str, torch.Tensor] = {}
+    #     for name, fut in futures.items():
+    #         outputs[name] = torch.jit.wait(fut)
+
+    #     return outputs
+
     def forward(self, x: Dict[str, torch.Tensor]):
-        futures: Dict[str, Future[torch.Tensor]] = {}
-        for name, net in self.modality_net_map.items():
-            futures[name] = torch.jit.fork(net, x[name])
-
-        outputs: Dict[str, torch.Tensor] = {}
-        for name, fut in futures.items():
-            outputs[name] = torch.jit.wait(fut)
-
+        outputs = {}
+        for modality in self.modality_net_map.keys():
+            outputs[modality] = self.modality_net_map[modality](x[modality])
         return outputs
-        
+
+    
 class GBMNet(nn.Module):
     """Global model to learn predictive tasks"""
-
+    @enforce_signature_types
     def __init__(
         self,
         head_cfg: Dict,

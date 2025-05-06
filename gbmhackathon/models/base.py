@@ -1,7 +1,7 @@
 import os, json
 import torch
 import torch.nn as nn
-
+from gbmhackathon.utils.module_functions import enforce_signature_types
 
 class BaseModule(nn.Module):
     """
@@ -55,6 +55,7 @@ class BaseModule(nn.Module):
 
 
 class TestClass(BaseModule, nn.Module):
+    @enforce_signature_types
     def __init__(self, conv_size=3):
         super().__init__()
         self.conv_layer = nn.Conv1d(1, 1, conv_size)

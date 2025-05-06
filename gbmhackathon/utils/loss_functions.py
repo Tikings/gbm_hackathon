@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from typing import Dict, List, Tuple
 import warnings
 
+from gbmhackathon.utils.module_functions import enforce_signature_types
+
 from torchviz import make_dot
 
 # INFONCE LOSS PSEUDOCODE FOR OUR IDEA
@@ -50,7 +52,7 @@ class InfoNCELoss(nn.Module):
     This implementation handles batches of patients with multiple modalities, some of which may be missing.
     It computes contrastive loss between modalities from the same patient (positives) vs. different patients (negatives).
     """
-
+    @enforce_signature_types
     def __init__(self, modalities: List[str], 
                  patient_map: Dict[str, int] = None, 
                  temperature: float = 0.07, 
@@ -198,9 +200,10 @@ class InfoNCELoss(nn.Module):
         return batch_loss
         
 class SmoothingFunction(nn.Module):
-    def __init__(self, bound: float = -10, 
+    @enforce_signature_types
+    def __init__(self, bound: float = -10.0, 
                  slope: float = 0.05, 
-                 rate: float = -2):
+                 rate: float = -2.0):
         super().__init__()
         self.bound = bound
         self.slope = slope
@@ -222,7 +225,7 @@ class RankMe(nn.Module):
     RankMe = exp( - sum_k p_k log p_k ),
     where p_k = sigma_k / sum_j sigma_j are normalized singular values.
     """
-
+    @enforce_signature_types
     def __init__(self, eps: float = 1e-12):
         """
         Args:
@@ -264,6 +267,7 @@ class RankMe(nn.Module):
         return rankme
         
 class RegularizedInfoNCELoss(nn.Module):
+    @enforce_signature_types
     def __init__(self,
                  modalities: List[str], 
                  patient_map: Dict[str, int] = None, 

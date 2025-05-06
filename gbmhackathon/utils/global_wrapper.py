@@ -12,13 +12,15 @@ from datetime import datetime
 import json
 import pickle as pkl 
 import torch.nn as nn
+from typing import Dict
 
 
 
 
 class MME_Global : 
-
-    def __init__(self,config,save=True) :
+    """Class to handle MultiModalEncoder experiments"""
+    @enforce_signature_types
+    def __init__(self,config: Dict, save: bool=True) :
 
         """
         
