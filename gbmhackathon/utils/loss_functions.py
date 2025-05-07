@@ -295,7 +295,7 @@ class RegularizedInfoNCELoss(nn.Module):
         
     def forward(self, batch) -> torch.Tensor:
         nce_loss = self.infonce(batch)
-        print(nce_loss)
+        # print(nce_loss)
         if self.alpha != 0:
             out_dict, _, _ = batch
             N = list(out_dict.values())[0].size(0)  # Number of patients

@@ -534,17 +534,17 @@ class GraphEncoder(nn.Module):
 #         return self.mlp(x)
 
 
-    
-class ModalityEncoder(nn.Module):
-    """Defines a unified module for all Encoders."""
+class PredictionHead(nn.Module):
+    """Defines a unified module for prediction heads."""
     @enforce_signature_types
     def __init__(
         self,
-        config: Dict,
+        net_type: str,
+        net_config: Dict,
+        device: Union[str, torch.device, None] = None,
     ):
         super().__init__()
         # Handle device selection - use CUDA if available, otherwise CPU
-        device: Union[str, torch.device] = config["device"] if "device" in config.keys() else None
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
@@ -552,9 +552,47 @@ class ModalityEncoder(nn.Module):
         
         print(f"Using device: {self.device}")
         
-        self.net_type = config["net_type"]
-        self.config = config
-        self.net_config = self.config["net_config"]
+        self.net_type = net_type
+        self.config = {"net_type":net_type,
+                       "net_config":net_config,
+                       "device":device}
+        self.net_config = net_config
+        
+        if self.net_type == "mlp":
+            self.net: nn.Module = instantiate(self.net_config, MLP).to(self.device)
+        elif self.net_type == "attention":
+            self.net: nn.Module = instantiate(self.net_config, AttentionNetwork).to(self.device)
+        elif self.net_type == "graph":
+            self.net: nn.Module = instantiate(self.net_config, GraphEncoder).to(self.device)
+        else:
+            raise ValueError(f"Wrong 'net_type' argument value. Got {self.net_type} but must be either 'attention' or 'mlp' or 'graph'")
+            
+    def forward(self, x):
+        return self.net(x)
+        
+class ModalityEncoder(nn.Module):
+    """Defines a unified module for all Encoders."""
+    @enforce_signature_types
+    def __init__(
+        self,
+        net_type: str,
+        net_config: Dict,
+        device: Union[str, torch.device, None] = None,
+    ):
+        super().__init__()
+        # Handle device selection - use CUDA if available, otherwise CPU
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+        
+        print(f"Using device: {self.device}")
+        
+        self.net_type = net_type
+        self.config = {"net_type":net_type,
+                       "net_config":net_config,
+                       "device":device}
+        self.net_config = net_config
         
         if self.net_type == "mlp":
             self.net: nn.Module = instantiate(self.net_config, MLP).to(self.device)
@@ -614,36 +652,38 @@ class MultiModalEncoder(nn.Module):
         self.wes_cfg = wes_cfg
         self.clinical_cfg = clinical_cfg
 
+        self.global_cfg = {"hne_cfg": self.hne_cfg,
+                             "spatial_cfg":self.spatial_cfg,
+                             "sc_cfg":self.sc_cfg,
+                             "bulk_cfg":self.bulk_cfg,
+                             "wes_cfg": self.wes_cfg,
+                             "clinical_cfg": self.clinical_cfg}
+        
         self.modality_net_map = nn.ModuleDict()
         # Instantiate architecture
         if self.hne_cfg is not None:
-            # self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
-            self.hne_net = ModalityEncoder(config=self.hne_cfg)
+            print(self.hne_cfg)
+            self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
             self.modality_net_map["hne"] = self.hne_net
             
         if self.spatial_cfg is not None:
-            # self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
-            self.spatial_net = ModalityEncoder(config=self.spatial_cfg)
+            self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
             self.modality_net_map["spatial"] = self.spatial_net
             
         if self.sc_cfg is not None:
-            # self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
-            self.sc_net = ModalityEncoder(config=self.sc_cfg)
+            self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
             self.modality_net_map["scRNA"] = self.sc_net
             
         if self.bulk_cfg is not None:
-            # self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
-            self.bulk_net = ModalityEncoder(config=self.bulk_cfg)
+            self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
             self.modality_net_map["bulk"] = self.bulk_net
             
         if self.wes_cfg is not None:
-            # self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
-            self.wes_net = ModalityEncoder(config=self.wes_cfg)
+            self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
             self.modality_net_map["wes"] = self.wes_net
             
         if self.clinical_cfg is not None:
-            # self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
-            self.clinical_net = ModalityEncoder(config=self.clinical_cfg)
+            self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
             self.modality_net_map["clinical"] = self.clinical_net
 
     # def forward(self, x: Dict[str, torch.Tensor]):
@@ -663,54 +703,45 @@ class MultiModalEncoder(nn.Module):
             outputs[modality] = self.modality_net_map[modality](x[modality])
         return outputs
 
-    
 class GBMNet(nn.Module):
     """Global model to learn predictive tasks"""
     @enforce_signature_types
-    def __init__(
-        self,
-        head_cfg: Dict,
-        include_mme: bool = False,
-        hne_cfg: Dict | None = None,
-        spatial_cfg: Dict | None = None,
-        sc_cfg: Dict | None = None,
-        bulk_cfg: Dict | None = None,
-        wes_cfg: Dict | None = None,
-        clinical_cfg: Dict | None = None,
-    ):
+    def __init__(self,
+                 head_cfg: Dict,
+                 load_mme: bool = False,
+                 mme_path: str | None = None,
+                 mme_cfg: Dict | None = None,
+                 freeze_mme: bool = False,
+                ):
         super().__init__()
         # Store configs
         self.head_cfg = head_cfg
-        self.include_mme = include_mme
-
-        if include_mme:
-            self.hne_cfg = hne_cfg
-            self.spatial_cfg = spatial_cfg
-            self.sc_cfg = sc_cfg
-            self.bulk_cfg = bulk_cfg
-            self.wes_cfg = wes_cfg
-            self.clinical_cfg = clinical_cfg
-
-            global_mme_cfg = {"hne_cfg": self.hne_cfg,
-                             "spatial_cfg":self.spatial_cfg,
-                             "sc_cfg":self.sc_cfg,
-                             "bulk_cfg":self.bulk_cfg,
-                             "wes_cfg": self.wes_cfg,
-                             "clinical_cfg": self.clinical_cfg}
-            self.mme = MultiModalEncoder(**global_mme_cfg)
+        self.load_mme = load_mme
+        
+        if not load_mme:
+            self.mme_cfg = mme_cfg
+            self.mme = instantiate(self.mme_cfg, MultiModalEncoder)
         else:
             # None for now but should be replaced with load_model(mme_path)
+            assert mme_path is not None, f"When argument 'load_mme' is set to True, you must provide a path for MME model loading.\nCurrent is {mme_path}"
+            self.mme_path = mme_path
             self.mme = None
-
-        self.head_net = MLP(**self.head_cfg)
+            self.mme_cfg = self.mme.global_cfg
+            
+        self.freeze_mme = freeze_mme
+        for param in self.mme.parameters():
+            # if freeze, parameters do not require grad
+            param.requires_grad = not self.freeze_mme
+            
+        self.head_net = instantiate(self.head_cfg, PredictionHead)
 
     def forward(self, x: Dict[str, torch.Tensor]):
         if self.mme is not None:
-            x = self.mme(x)
+            mme_outputs = self.mme(x)
             x_list = []
-            for pid in x[list(x.keys())[0]].size(0):
-                patient_representation = torch.cat([x[mod][pid] for mod in x.keys()], dim=0).unsqueeze()
+            for pid in range(mme_outputs[list(mme_outputs.keys())[0]].size(0)):
+                patient_representation = torch.cat([mme_outputs[mod][pid] for mod in mme_outputs.keys()], dim=0).unsqueeze(0)
                 x_list.append(patient_representation)
             x = torch.cat(x_list, dim=0)
-        outputs = self.head_net(x)
-        return outputs
+        predictive_outputs = self.head_net(x)
+        return mme_outputs, predictive_outputs
