@@ -284,7 +284,7 @@ class MME_Global :
         return list_modalities
     
 
-    def __replace_string_by_callable(string): 
+    def __replace_string_by_callable(self,string): 
         """
         
         
@@ -342,6 +342,8 @@ class ModularModel :
 
         self.config=config
         self.__verify_config()
+        self.__format_config()
+        
 
 
     
@@ -365,7 +367,7 @@ class ModularModel :
         if  self.architecture_config["MME"]["path"] is None : 
 
                     MME=MME_Global(self.config,save=False)
-                    MME.fit()
+                    MME.fit_mme()
                     self.mme=MME.mme
 
         else : 
@@ -387,7 +389,7 @@ class ModularModel :
             
              self.GbmNet=instantiate(GBM_cfg,GBMNet)
 
-    def __replace_string_by_callable(string): 
+    def __replace_string_by_callable(self,string): 
         """
         
         
@@ -402,18 +404,59 @@ class ModularModel :
         """
         Because some things needs to be formated (ex : function call from string)
         """
-
+        
 
         if self.config["gbm_head"]["head_cfg"]["net_type"]=="mlp": 
-                self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"]=self.__replace_string_by_callable( self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"])
+                  self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"]=self.__replace_string_by_callable( self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"])
                   self.config["gbm_head"]["head_cfg"]["net_config"]["norm_layer"]=self.__replace_string_by_callable( self.config["gbm_head"]["head_cfg"]["net_config"]["norm_layer"])
+        self.__adjust_dimensions_architecture()
 
 
 
+    def __get_available_modalities(self): 
+
+        mod_cfg=self.config["MME_Model"]["modalities_data"]["modalities"]
+        list_modalities=list()
+
+        for modality in mod_cfg.keys(): 
+            if modality not in ["pkl_storage_folder","missing_mods"] :
+                list_modalities.append(modality)
+
+        return list_modalities
+        
+    def __adjust_dimensions_architecture(self): 
+        """
+        """
+
+        count=0
+        for mod,cfg in self.config["MME_Model"]["architecture"]["MME"].items(): 
+            print(self.__get_available_modalities())
+            print(mod)
+            if mod.split("_")[0] in self.__get_available_modalities():
+                
+                if cfg["net_type"]=="mlp":
+                    count+=cfg["net_config"]["layers"][-1]
+    
+                elif cfg["net_type"]=="attention":
+                    raise Exception("A implémenter")
+                   
+                else :
+                    
+                    raise Exception("Not recognized") 
+        if self.config["gbm_head"]["head_cfg"]["net_type"]=="mlp": 
+            self.config["gbm_head"]["head_cfg"]["net_config"]["layers"][0]=count
+        else : 
+            raise Exception("A implémenter")
+            
+                    
+                
 
     def fit(self): 
          
-
+         print("start phase 1 ...") 
+         self.__phase_1()
+         print("start phase 2 ...") 
+         self.__phase_2()
          "print"
          pass
          
