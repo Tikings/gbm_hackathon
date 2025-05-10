@@ -284,6 +284,16 @@ class MME_Global :
         return list_modalities
     
 
+    def __replace_string_by_callable(string): 
+        """
+        
+        
+        """
+
+        module_name,act_funct_name=string.rsplit(".",1)
+        module = __import__(module_name, fromlist=[act_funct_name])
+        callable_=getattr(module, act_funct_name)
+        return callable_
 
     def __format_config(self) : 
         """
@@ -300,18 +310,12 @@ class MME_Global :
 
 
             if self.config["MME_Model"]["architecture"]["MME"][key]["net_type"] == 'mlp' :
-                    module_name,act_funct_name=value["net_config"]["act_fn"].rsplit(".",1)
-                    module = __import__(module_name, fromlist=[act_funct_name])
-                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]=getattr(module, act_funct_name)
-
-
-                    module_name,normlayer_name=value["net_config"]["norm_layer"].rsplit(".",1)
-                    module = __import__(module_name, fromlist=[normlayer_name])
-                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"]=getattr(module, normlayer_name)
+                  
+                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]=self.__replace_string_by_callable(self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]) 
+                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"]=self.__replace_string_by_callable(self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"])
             
             self.config["MME_Model"]["architecture"]["MME"][key]["device"]=self.config["global_settings"]["device"]
 
- 
 
     
 
@@ -383,11 +387,34 @@ class ModularModel :
             
              self.GbmNet=instantiate(GBM_cfg,GBMNet)
 
+    def __replace_string_by_callable(string): 
+        """
+        
+        
+        """
+
+        module_name,act_funct_name=string.rsplit(".",1)
+        module = __import__(module_name, fromlist=[act_funct_name])
+        callable_=getattr(module, act_funct_name)
+        return callable_
+
+    def __format_config(self) : 
+        """
+        Because some things needs to be formated (ex : function call from string)
+        """
+
+
+        if self.config["gbm_head"]["head_cfg"]["net_type"]=="mlp": 
+                self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"]=self.__replace_string_by_callable( self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"])
+                  self.config["gbm_head"]["head_cfg"]["net_config"]["norm_layer"]=self.__replace_string_by_callable( self.config["gbm_head"]["head_cfg"]["net_config"]["norm_layer"])
+
 
 
 
     def fit(self): 
          
+
+         "print"
          pass
          
          
