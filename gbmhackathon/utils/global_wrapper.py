@@ -1,5 +1,5 @@
 from gbmhackathon.training.patientwise import *
-from gbmhackathon.models.mme import MultiModalEncoder
+from gbmhackathon.models.mme import MultiModalEncoder, GBMNet
 from gbmhackathon.utils.loss_functions import InfoNCELoss, RegularizedInfoNCELoss, SmoothingFunction
 from gbmhackathon.utils.module_functions import instantiate
 from gbmhackathon.s3_loader import load_s3
@@ -320,6 +320,91 @@ class MME_Global :
         verify here whatever you want on config
         IMPLEMENTER TOUTES LES VERIFS NECESSAIRES 
         """
+
+
+
+
+
+
+
+class ModularModel : 
+
+
+    def __init__(self,config): 
+        """
+        
+        """
+
+        self.config=config
+        self.__verify_config()
+
+
+    
+    def __verify_config(self):
+
+        """
+        check whatever you want on config here
+        typiquement : vérifier qu'il y'a bien une phase 1 si on n'a pas une phase 2
+        """
+
+
+        pass
+
+    def __phase_1(self) : 
+        """Instantiate of load a MME, fit it (constrastive phase) if required
+        
+        
+        """
+
+        self.architecture_config=self.config["Global_Architecture"]
+        if  self.architecture_config["MME"]["path"] is None : 
+
+                    MME=MME_Global(self.config,save=False)
+                    MME.fit()
+                    self.mme=MME.mme
+
+        else : 
+             
+                raise "il faut implémenter le chargement d'un modèle déja entraîné"
+        
+        
+
+    def __phase_2(self) :
+        
+
+        if self.config["Global_Architecture"]["head"]["type"]== "network" : 
+             
+
+             GBM_cfg=self.config["gbm_head"]|{"mme" : self.mme}
+             GBM_cfg["mme_cfg"]=self.config["MME_Model"]["architecture"]["MME"]
+             if self.config["Global_Architecture"]["MME"]["phase_2_training"] : 
+                 GBM_cfg["freeze_mme"]=True
+            
+             self.GbmNet=instantiate(GBM_cfg,GBMNet)
+
+
+
+
+    def fit(self): 
+         
+         pass
+         
+         
+
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         
 

@@ -706,8 +706,9 @@ class MultiModalEncoder(nn.Module):
 class GBMNet(nn.Module):
     """Global model to learn predictive tasks"""
     @enforce_signature_types
-    def __init__(self,
+    def __init__(self, 
                  head_cfg: Dict,
+                 mme=None,
                  load_mme: bool = False,
                  mme_path: str | None = None,
                  mme_cfg: Dict | None = None,
@@ -717,16 +718,20 @@ class GBMNet(nn.Module):
         # Store configs
         self.head_cfg = head_cfg
         self.load_mme = load_mme
+        if mme is not None : 
         
-        if not load_mme:
-            self.mme_cfg = mme_cfg
-            self.mme = instantiate(self.mme_cfg, MultiModalEncoder)
-        else:
-            # None for now but should be replaced with load_model(mme_path)
-            assert mme_path is not None, f"When argument 'load_mme' is set to True, you must provide a path for MME model loading.\nCurrent is {mme_path}"
-            self.mme_path = mme_path
-            self.mme = None
-            self.mme_cfg = self.mme.global_cfg
+            self.mme=mme
+        
+        else : 
+            if not load_mme:
+                self.mme_cfg = mme_cfg
+                self.mme = instantiate(self.mme_cfg, MultiModalEncoder)
+            else:
+                # None for now but should be replaced with load_model(mme_path)
+                assert mme_path is not None, f"When argument 'load_mme' is set to True, you must provide a path for MME model loading.\nCurrent is {mme_path}"
+                self.mme_path = mme_path
+                self.mme = None
+                self.mme_cfg = self.mme.global_cfg
             
         self.freeze_mme = freeze_mme
         for param in self.mme.parameters():
