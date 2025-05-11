@@ -131,7 +131,18 @@
                                     }
 
                                 
-                        }
+                        },
+
+                        "training" : 
+
+                                {
+                                  "epochs" : 10,
+                                  "batch_size" : 5
+
+
+
+
+                                }
                 },
 
 "Global_Architecture" : {

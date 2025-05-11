@@ -1,4 +1,5 @@
 from gbmhackathon.training.patientwise import *
+from gbmhackathon.training.predictive import *
 from gbmhackathon.models.mme import MultiModalEncoder, GBMNet
 from gbmhackathon.utils.loss_functions import InfoNCELoss, RegularizedInfoNCELoss, SmoothingFunction
 from gbmhackathon.utils.module_functions import instantiate
@@ -378,7 +379,10 @@ class ModularModel :
 
     def __phase_2(self) :
         
-
+        self.predictive_dataset= PredictiveLearningDataset(name_emb=self.config["MME_Model"]["modalities_data"]["modalities"],folder_name=self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"],device=self.config["global_settings"]["device"], dropout=0.35) ### Voir pou rendre paramétrable le dropout
+        self.predictive_loader= DataLoader(self.predictive_dataset, self.config["gbm_head"]["training"]["batch_size"], shuffle=True, collate_fn=collate_predictive, generator=torch.Generator(device=self.predictive_dataset.device))
+        
+        
         if self.config["Global_Architecture"]["head"]["type"]== "network" : 
              
 
@@ -388,6 +392,69 @@ class ModularModel :
                  GBM_cfg["freeze_mme"]=True
             
              self.GbmNet=instantiate(GBM_cfg,GBMNet)
+        
+    def __fit_phase_2(self) : 
+
+        """
+        
+        
+        """
+
+        EPOCH_LOSSES = []
+        for epoch in range(self.config["gbm_head"]["training"]["epochs"]):
+            epoch_loss = []
+            reg_loss_list = []
+            clf_loss_list = []
+            
+            for idx, batch in enumerate(self.predictive_loader):
+               
+                patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
+               
+                contrastive_outputs, predictive_outputs = self.GbmNet(X_dict)
+                
+                contrastive_loss_batch = (contrastive_outputs, patient_ids, avail_mods)
+
+          
+                contrastive_loss = contrastive_loss_fn(contrastive_loss_batch)
+                # print(predictive_outputs[:,:-2].size(), batch_targets[:,:-1].size())
+                mse_loss = mse_loss_fn(predictive_outputs[:,:-2], batch_targets[:,:-2])
+                binary_loss = binary_loss_fn(binary_act_fn(predictive_outputs[:,-2:]), batch_targets[:,-2:])
+            
+                loss = contrastive_loss + mse_loss + binary_loss
+
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+
+                # Learning schedule
+                before_lr = optimizer.param_groups[0]["lr"]
+                scheduler.step()
+
+                # Store losses
+                epoch_loss.append(loss.item())
+                reg_loss_list.append(mse_loss.item())
+                clf_loss_list.append(binary_loss.item())
+
+            print(f"\n\nLearning Rate: {before_lr}")
+            # For monitoring, not actually necessary
+            pos_align = np.mean(contrastive_loss_fn.infonce.pos_alignments)
+            neg_align = np.mean(contrastive_loss_fn.infonce.neg_alignments)
+            print("************************************************ GLOBAL ***********************************************")
+            print(f"Epoch {epoch} total loss: {np.mean(epoch_loss):.4f}".upper())
+            print("*******************************************************************************************************")
+
+            print("************************************************ EMBEDDING QUALITY ***********************************************")
+            print(f"\nEpoch {epoch} Embedding quality (Alignement): {pos_align:.4f}".upper())
+            print(f"Epoch {epoch} Embedding quality (Negative Alignement): {neg_align:.4f}".upper())
+            print(f"Epoch {epoch} Embedding quality (Alignement ratio): {np.abs(pos_align/(neg_align + 1e-8)):.4f}".upper())
+            print("*******************************************************************************************************")
+
+            print("************************************************ PREDICTIVE POWER ************************************************")
+            print(f"Epoch {epoch} MSE loss: {np.mean(reg_loss_list):.4f}".upper())
+            print(f"Epoch {epoch} BCE loss: {np.mean(clf_loss_list):.4f}".upper())
+            print("*******************************************************************************************************")
+            contrastive_loss_fn.infonce.clear_alignments()
+            EPOCH_LOSSES.append(np.mean(epoch_loss))
 
     def __replace_string_by_callable(self,string): 
         """
