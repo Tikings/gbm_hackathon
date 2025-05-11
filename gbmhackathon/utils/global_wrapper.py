@@ -1,5 +1,6 @@
 from gbmhackathon.training.patientwise import *
-from gbmhackathon.models.mme import MultiModalEncoder
+from gbmhackathon.training.predictive import *
+from gbmhackathon.models.mme import MultiModalEncoder, GBMNet
 from gbmhackathon.utils.loss_functions import InfoNCELoss, RegularizedInfoNCELoss, SmoothingFunction
 from gbmhackathon.utils.module_functions import instantiate
 from gbmhackathon.s3_loader import load_s3
@@ -13,6 +14,7 @@ import json
 import pickle as pkl 
 import torch.nn as nn
 from typing import Dict
+from gbmhackathon.utils.module_functions import enforce_signature_types
 
 
 
@@ -283,6 +285,16 @@ class MME_Global :
         return list_modalities
     
 
+    def __replace_string_by_callable(self,string): 
+        """
+        
+        
+        """
+
+        module_name,act_funct_name=string.rsplit(".",1)
+        module = __import__(module_name, fromlist=[act_funct_name])
+        callable_=getattr(module, act_funct_name)
+        return callable_
 
     def __format_config(self) : 
         """
@@ -299,18 +311,12 @@ class MME_Global :
 
 
             if self.config["MME_Model"]["architecture"]["MME"][key]["net_type"] == 'mlp' :
-                    module_name,act_funct_name=value["net_config"]["act_fn"].rsplit(".",1)
-                    module = __import__(module_name, fromlist=[act_funct_name])
-                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]=getattr(module, act_funct_name)
-
-
-                    module_name,normlayer_name=value["net_config"]["norm_layer"].rsplit(".",1)
-                    module = __import__(module_name, fromlist=[normlayer_name])
-                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"]=getattr(module, normlayer_name)
+                  
+                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]=self.__replace_string_by_callable(self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["act_fn"]) 
+                    self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"]=self.__replace_string_by_callable(self.config["MME_Model"]["architecture"]["MME"][key]["net_config"]["norm_layer"])
             
             self.config["MME_Model"]["architecture"]["MME"][key]["device"]=self.config["global_settings"]["device"]
 
- 
 
     
 
@@ -320,6 +326,223 @@ class MME_Global :
         verify here whatever you want on config
         IMPLEMENTER TOUTES LES VERIFS NECESSAIRES 
         """
+
+
+
+
+
+
+
+class ModularModel : 
+
+
+    def __init__(self,config): 
+        """
+        
+        """
+
+        self.config=config
+        self.__verify_config()
+        self.__format_config()
+        
+
+
+    
+    def __verify_config(self):
+
+        """
+        check whatever you want on config here
+        typiquement : vérifier qu'il y'a bien une phase 1 si on n'a pas une phase 2
+        """
+
+
+        pass
+
+    def __phase_1(self) : 
+        """Instantiate of load a MME, fit it (constrastive phase) if required
+        
+        
+        """
+
+        self.architecture_config=self.config["Global_Architecture"]
+        if  self.architecture_config["MME"]["path"] is None : 
+
+                    MME=MME_Global(self.config,save=False)
+                    MME.fit_mme()
+                    self.mme=MME.mme
+
+        else : 
+             
+                raise "il faut implémenter le chargement d'un modèle déja entraîné"
+        
+        
+
+    def __phase_2(self) :
+        
+        self.predictive_dataset= PredictiveLearningDataset(name_emb=self.config["MME_Model"]["modalities_data"]["modalities"],folder_name=self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"],device=self.config["global_settings"]["device"], dropout=0.35) ### Voir pou rendre paramétrable le dropout
+        self.predictive_loader= DataLoader(self.predictive_dataset, self.config["gbm_head"]["training"]["batch_size"], shuffle=True, collate_fn=collate_predictive, generator=torch.Generator(device=self.predictive_dataset.device))
+        
+        
+        if self.config["Global_Architecture"]["head"]["type"]== "network" : 
+             
+
+             GBM_cfg=self.config["gbm_head"]|{"mme" : self.mme}
+             GBM_cfg["mme_cfg"]=self.config["MME_Model"]["architecture"]["MME"]
+             if self.config["Global_Architecture"]["MME"]["phase_2_training"] : 
+                 GBM_cfg["freeze_mme"]=True
+            
+             self.GbmNet=instantiate(GBM_cfg,GBMNet)
+        
+    def __fit_phase_2(self) : 
+
+        """
+        
+        
+        """
+
+        EPOCH_LOSSES = []
+        for epoch in range(self.config["gbm_head"]["training"]["epochs"]):
+            epoch_loss = []
+            reg_loss_list = []
+            clf_loss_list = []
+            
+            for idx, batch in enumerate(self.predictive_loader):
+               
+                patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
+               
+                contrastive_outputs, predictive_outputs = self.GbmNet(X_dict)
+                
+                contrastive_loss_batch = (contrastive_outputs, patient_ids, avail_mods)
+
+          
+                contrastive_loss = contrastive_loss_fn(contrastive_loss_batch)
+                # print(predictive_outputs[:,:-2].size(), batch_targets[:,:-1].size())
+                mse_loss = mse_loss_fn(predictive_outputs[:,:-2], batch_targets[:,:-2])
+                binary_loss = binary_loss_fn(binary_act_fn(predictive_outputs[:,-2:]), batch_targets[:,-2:])
+            
+                loss = contrastive_loss + mse_loss + binary_loss
+
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+
+                # Learning schedule
+                before_lr = optimizer.param_groups[0]["lr"]
+                scheduler.step()
+
+                # Store losses
+                epoch_loss.append(loss.item())
+                reg_loss_list.append(mse_loss.item())
+                clf_loss_list.append(binary_loss.item())
+
+            print(f"\n\nLearning Rate: {before_lr}")
+            # For monitoring, not actually necessary
+            pos_align = np.mean(contrastive_loss_fn.infonce.pos_alignments)
+            neg_align = np.mean(contrastive_loss_fn.infonce.neg_alignments)
+            print("************************************************ GLOBAL ***********************************************")
+            print(f"Epoch {epoch} total loss: {np.mean(epoch_loss):.4f}".upper())
+            print("*******************************************************************************************************")
+
+            print("************************************************ EMBEDDING QUALITY ***********************************************")
+            print(f"\nEpoch {epoch} Embedding quality (Alignement): {pos_align:.4f}".upper())
+            print(f"Epoch {epoch} Embedding quality (Negative Alignement): {neg_align:.4f}".upper())
+            print(f"Epoch {epoch} Embedding quality (Alignement ratio): {np.abs(pos_align/(neg_align + 1e-8)):.4f}".upper())
+            print("*******************************************************************************************************")
+
+            print("************************************************ PREDICTIVE POWER ************************************************")
+            print(f"Epoch {epoch} MSE loss: {np.mean(reg_loss_list):.4f}".upper())
+            print(f"Epoch {epoch} BCE loss: {np.mean(clf_loss_list):.4f}".upper())
+            print("*******************************************************************************************************")
+            contrastive_loss_fn.infonce.clear_alignments()
+            EPOCH_LOSSES.append(np.mean(epoch_loss))
+
+    def __replace_string_by_callable(self,string): 
+        """
+        
+        
+        """
+
+        module_name,act_funct_name=string.rsplit(".",1)
+        module = __import__(module_name, fromlist=[act_funct_name])
+        callable_=getattr(module, act_funct_name)
+        return callable_
+
+    def __format_config(self) : 
+        """
+        Because some things needs to be formated (ex : function call from string)
+        """
+        
+
+        if self.config["gbm_head"]["head_cfg"]["net_type"]=="mlp": 
+                  self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"]=self.__replace_string_by_callable( self.config["gbm_head"]["head_cfg"]["net_config"]["act_fn"])
+                  self.config["gbm_head"]["head_cfg"]["net_config"]["norm_layer"]=self.__replace_string_by_callable( self.config["gbm_head"]["head_cfg"]["net_config"]["norm_layer"])
+        self.__adjust_dimensions_architecture()
+
+
+
+    def __get_available_modalities(self): 
+
+        mod_cfg=self.config["MME_Model"]["modalities_data"]["modalities"]
+        list_modalities=list()
+
+        for modality in mod_cfg.keys(): 
+            if modality not in ["pkl_storage_folder","missing_mods"] :
+                list_modalities.append(modality)
+
+        return list_modalities
+        
+    def __adjust_dimensions_architecture(self): 
+        """
+        """
+
+        count=0
+        for mod,cfg in self.config["MME_Model"]["architecture"]["MME"].items(): 
+            print(self.__get_available_modalities())
+            print(mod)
+            if mod.split("_")[0] in self.__get_available_modalities():
+                
+                if cfg["net_type"]=="mlp":
+                    count+=cfg["net_config"]["layers"][-1]
+    
+                elif cfg["net_type"]=="attention":
+                    raise Exception("A implémenter")
+                   
+                else :
+                    
+                    raise Exception("Not recognized") 
+        if self.config["gbm_head"]["head_cfg"]["net_type"]=="mlp": 
+            self.config["gbm_head"]["head_cfg"]["net_config"]["layers"][0]=count
+        else : 
+            raise Exception("A implémenter")
+            
+                    
+                
+
+    def fit(self): 
+         
+         print("start phase 1 ...") 
+         self.__phase_1()
+         print("start phase 2 ...") 
+         self.__phase_2()
+         "print"
+         pass
+         
+         
+
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         
 
