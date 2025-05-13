@@ -20,13 +20,15 @@
                                 "epochs" :5,
                         
                                 "InfoNCE_Loss": {
-                                        "temperature" :0.05,
+                                        "temperature" :100,
                                         "similarity":"nt-xent", 
-                                        "alpha" : 0.1,
-                                        "bound" :-10, 
+                                        "alpha" : 0,
+                                        "bound" :-50, 
                                         "beta" : 0.2,
                                         "nce_eps": 1e-8,
                                         "reg_eps":1e-8,
+                                        "slope": 0.1,
+                                        "rate":-5, 
                                         "use_all_positives" : false},
                                 "Optimizer" : {
                                         "lr" : 1e-3}
@@ -41,7 +43,7 @@
                                                         "net_type": "mlp",
                                                         "net_config": {
                                                                         "layers": [1536, 512, 64],
-                                                                        "dropout": 0.65,
+                                                                        "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
                                                                         "norm_layer": "torch.nn.LayerNorm"
                                                                 }
@@ -70,7 +72,7 @@
                                                 "net_type": "mlp",
                                                 "net_config": {
                                                                         "layers": [1790, 550, 64],
-                                                                        "dropout": 0.65,
+                                                                        "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
                                                                         "norm_layer": "torch.nn.LayerNorm"
                                                     }
@@ -80,7 +82,7 @@
                                                 "net_type": "mlp",
                                                 "net_config": {
                                                                         "layers": [12, 10, 64],
-                                                                        "dropout": 0.65,
+                                                                        "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
                                                                         "norm_layer": "torch.nn.LayerNorm"
                                                     }
@@ -125,7 +127,7 @@
                                 "net_type": "mlp",
                                 "net_config": {
                                                         "layers": ["changer toutes les config ici !!!!!"],
-                                                        "dropout": 0.65,
+                                                        "dropout": 0.3,
                                                         "act_fn": "torch.nn.ReLU",
                                                         "norm_layer": "torch.nn.LayerNorm"
                                     }
@@ -137,7 +139,7 @@
 
                                 {
                                   "epochs" : 50,
-                                  "batch_size" : 5,
+                                  "batch_size" : 16,
                                   "lr" : 1e-4,
                                   "scheduler_II_cfg" :  {"T_max":50,
                                                         "eta_min":"dynamic"},
