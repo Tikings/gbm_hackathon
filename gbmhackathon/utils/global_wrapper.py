@@ -41,9 +41,8 @@ class MME_Global :
         
         
         self.dataset = PatientLearningDataset(self.config["MME_Model"]["modalities_data"]["modalities"], self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"], device=self.device)
-        self.dataloader = DataLoader(self.dataset, self.config["MME_Model"]["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator(device=self.dataset.device))
-        
-        
+        self.dataloader = DataLoader(self.dataset, self.config["MME_Model"]["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator())
+        print("device MME : {}".format(self.device))        
         self.missing_mods=load_s3(self.config["MME_Model"]["modalities_data"]["missing_mods"])
         
         self.id2sample=self.dataset.ind2patient
@@ -384,8 +383,13 @@ class ModularModel :
     def __phase_2(self) :
         
         self.predictive_dataset= PredictiveLearningDataset(name_emb=self.config["MME_Model"]["modalities_data"]["modalities"],folder_name=self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"],device=self.config["global_settings"]["device"], dropout=0.35) ### Voir pou rendre paramétrable le dropout
-        self.predictive_loader= DataLoader(self.predictive_dataset, self.config["gbm_head"]["training"]["batch_size"], shuffle=True, collate_fn=collate_predictive, generator=torch.Generator(device=self.predictive_dataset.device))
-        
+        self.predictive_loader= DataLoader(self.predictive_dataset, self.config["gbm_head"]["training"]["batch_size"], shuffle=True, collate_fn=collate_predictive, generator=torch.Generator()) ### Attention : enlevé device à cause de cuda qui fout la merde j'ai pas compris pq
+        ### tests
+        patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names=next(iter(self.predictive_loader))
+        print("predictive loader (X_dict) device : {}".format(X_dict["hne"].device)) 
+        print("predictive loader (batch_targets) device : {}".format(batch_targets.device)) 
+
+                                                                                       
         
         if self.config["Global_Architecture"]["head"]["type"]== "network" : 
              
@@ -395,17 +399,21 @@ class ModularModel :
              if self.config["Global_Architecture"]["MME"]["phase_2_training"] : 
                  GBM_cfg["freeze_mme"]=False
              else : 
-                 GBM_cfg["freeze_mme"]=True  ### Si le mme n'est pas à entraîner en phase 2 (à l'aide du predictive, on le freeze)
-            
+                 GBM_cfg["freeze_mme"]=True  ### Si le mme n'est pas à entraîner en phase 2 (à l'aide du predictive, on le freeze
+             GBM_cfg["head_cfg"]["device"]=self.config["global_settings"]["device"]
+             
              self.GbmNet=instantiate(GBM_cfg,GBMNet)
-             self.__fit_newtork_phase_2(**self.config["gbm_head"]["training"])
+    
+             cfg_training=self.config["gbm_head"]["training"] #### A corriger et bien réflechir la structure de la config
+             del cfg_training["batch_size"]
+             self.__fit_newtork_phase_2(**cfg_training)
 
         else : 
             raise Exception("A implémenter")
 
 
         
-    def __fit_newtork_phase_2(self,lr,epochs,scheduler_II_cfg,eta_min_coef=0.01,reg_loss_fn=nn.MSELoss,clf_loss_fn=nn.BCEWithLogitsLoss) : 
+    def __fit_newtork_phase_2(self,lr,epochs,scheduler_II_cfg,eta_min_coef=0.01,scheduler_II=torch.optim.lr_scheduler.CosineAnnealingLR,reg_loss_fn=nn.MSELoss,clf_loss_fn=nn.BCEWithLogitsLoss) : 
 
         """
         
@@ -445,13 +453,14 @@ class ModularModel :
                 patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
                 
                 contrastive_outputs, predictive_outputs = gbmnet(X_dict)
-            
+              
                 mse_loss = mse_loss_fn(predictive_outputs[:,:-2], batch_targets[:,:-2])
                 
                 binary_loss = binary_loss_fn(predictive_outputs[:,-2:], batch_targets[:,-2:])
           
             
                 loss = mse_loss + binary_loss 
+                
               
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(gbmnet.parameters(), max_norm=10.0)
@@ -465,6 +474,7 @@ class ModularModel :
                 epoch_loss.append(loss.item())
                 reg_loss_list.append(mse_loss.item())
                 clf_loss_list.append(binary_loss.item())
+            print("epoch {} - loss : {}".format(epoch,loss))
         self.GbmNet=gbmnet
         self.training_result["phase 2"]={"epoch_loss": epoch_loss,"reg_loss" : reg_loss_list,"clf_loss_list":clf_loss_list}
 
