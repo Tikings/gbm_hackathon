@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Callable
 import warnings
 
 from gbmhackathon.utils.module_functions import enforce_signature_types
@@ -129,10 +129,7 @@ class InfoNCELoss(nn.Module):
         if self.similarity == "original": # Original InfoNCE uses dot product similarity
             similarities = torch.matmul(bank, bank.T) 
         else: # cosine similarity (used in NT-Xent loss which is a variant of the InfoNCELoss)
-            norms = bank.norm(dim=1, keepdim=True).clamp(min=self.eps) # comute per-vector norms
-            bank_normed = bank / norms # normalize each vector by its norm
-            similarities = bank_normed @ bank_normed.T # compute similarity
-            
+            similarities = torch.nn.CosineSimilarity(dim=-1, eps=1e-8)(bank[None,:,:], bank[:,None,:])
         similarities = similarities / self.temperature  # [total_present_modalities, total_present_modalities]
         sim_exp = torch.exp(similarities)
             
@@ -279,6 +276,7 @@ class RegularizedInfoNCELoss(nn.Module):
                  bound: float = -10, 
                  slope: float = 0.05, 
                  rate: float = -2,
+                 smoothing_func: bool = True
                 ):
         super().__init__()
         self.infonce = InfoNCELoss(modalities=modalities, 
@@ -287,8 +285,10 @@ class RegularizedInfoNCELoss(nn.Module):
                                    similarity=similarity, 
                                    use_all_positives=use_all_positives)
         self.bound = bound
-        self.smoothing_func = SmoothingFunction(bound=self.bound, slope=slope, rate=rate)
-        
+        if smoothing_func:
+            self.smoothing_func = SmoothingFunction(bound=self.bound, slope=slope, rate=rate)
+        else:
+            self.smoothing_func = nn.Identity()
         self.alpha = alpha
         self.eps = eps
         # self.rankme_func = RankMe()
