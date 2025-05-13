@@ -267,18 +267,18 @@ def collate_predictive(batch):
             spatial_stack = [dic["spatial"] for _ in dic.keys()] #! Check the dimension
             connectivities_stack = [dic["connectivities"] for _ in dic.keys()]
             dict_batched["spatial"] = batcher_graphs(spatial_stack, connectivities_stack)
-
-    available_mod_tensor = torch.stack(list_available).type(torch.float32)
+    device = dict_batched[list(dict_batched.keys())[0]].device
+    available_mod_tensor = torch.stack(list_available).type(torch.float32).to(device)
     class_0 = [(torch.tensor(0).unsqueeze(0) if c[-1] != 0 else torch.tensor(1).unsqueeze(0)) for c in list_targets]
     class_1 = [(torch.tensor(0).unsqueeze(0) if c[-1] != 1 else torch.tensor(1).unsqueeze(0)) for c in list_targets]
     
-    class_0_targets_tensor = torch.stack(class_0).type(torch.float32)
+    class_0_targets_tensor = torch.stack(class_0).type(torch.float32).to(device)
     # print(class_0_targets_tensor.size())
-    class_1_targets_tensor = torch.stack(class_1).type(torch.float32)
+    class_1_targets_tensor = torch.stack(class_1).type(torch.float32).to(device)
     
-    class_targets_tensor = torch.cat([class_0_targets_tensor, class_1_targets_tensor], dim=1)
-    reg_targets_tensor = torch.stack([tensor[:-1] for tensor in list_targets]).type(torch.float32)
-    targets_tensor = torch.cat([reg_targets_tensor, class_targets_tensor], dim=1)
+    class_targets_tensor = torch.cat([class_0_targets_tensor, class_1_targets_tensor], dim=1).to(device)
+    reg_targets_tensor = torch.stack([tensor[:-1] for tensor in list_targets]).type(torch.float32).to(device)
+    targets_tensor = torch.cat([reg_targets_tensor, class_targets_tensor], dim=1).to(device)
     return list_patient, modalities, dict_batched, available_mod_tensor, targets_tensor, targets_names
 
 # def collate_predictive_colearning(batch): 
