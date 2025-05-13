@@ -17,10 +17,10 @@
 
                  "training" : {
                                 "batch_size" : 16,
-                                "epochs" :5,
+                                "epochs" :100,
                         
                                 "InfoNCE_Loss": {
-                                        "temperature" :100,
+                                        "temperature" :10,
                                         "similarity":"nt-xent", 
                                         "alpha" : 0,
                                         "bound" :-50, 
