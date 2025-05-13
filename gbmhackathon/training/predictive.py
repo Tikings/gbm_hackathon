@@ -33,7 +33,9 @@ class PredictiveLearningDataset(Dataset):
         # Handle device selection - use CUDA if available, otherwise CPU
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            print("cas 1 : device reconnu comme None")
         else:
+            print("cas 2 : device reconnu : {} ".format(device))
             self.device = torch.device(device)
         
         print(f"Using device: {self.device}")

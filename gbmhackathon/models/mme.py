@@ -550,7 +550,7 @@ class PredictionHead(nn.Module):
         else:
             self.device = torch.device(device)
         
-        print(f"Using device: {self.device}")
+        print(f"Using device(prediction head) : {self.device}")
         
         self.net_type = net_type
         self.config = {"net_type":net_type,
