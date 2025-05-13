@@ -344,6 +344,8 @@ class ModularModel :
         self.config=config
         self.__verify_config()
         self.__format_config()
+        self.training_result={}
+    
         
 
 
@@ -369,7 +371,9 @@ class ModularModel :
 
                     MME=MME_Global(self.config,save=False)
                     MME.fit_mme()
+                    self.training_result["phase 1"]=MME.training
                     self.mme=MME.mme
+                    
 
         else : 
              
@@ -389,73 +393,85 @@ class ModularModel :
              GBM_cfg=self.config["gbm_head"]|{"mme" : self.mme}
              GBM_cfg["mme_cfg"]=self.config["MME_Model"]["architecture"]["MME"]
              if self.config["Global_Architecture"]["MME"]["phase_2_training"] : 
-                 GBM_cfg["freeze_mme"]=True
+                 GBM_cfg["freeze_mme"]=False
+             else : 
+                 GBM_cfg["freeze_mme"]=True  ### Si le mme n'est pas à entraîner en phase 2 (à l'aide du predictive, on le freeze)
             
              self.GbmNet=instantiate(GBM_cfg,GBMNet)
+             self.__fit_newtork_phase_2(**self.config["gbm_head"]["training"])
+
+        else : 
+            raise Exception("A implémenter")
+
+
         
-    def __fit_phase_2(self) : 
+    def __fit_newtork_phase_2(self,lr,epochs,scheduler_II_cfg,eta_min_coef=0.01,reg_loss_fn=nn.MSELoss,clf_loss_fn=nn.BCEWithLogitsLoss) : 
 
         """
         
         
         """
+        gbmnet=self.GbmNet
+        if gbmnet.freeze_mme:
+            
+            gbmnet.mme.eval()
+            
+            optimizer_II = Adam(gbmnet.head_net.parameters(), lr=lr)
+        else:
+            
+            optimizer_II = optimizer_II(gbmnet.parameters(), lr=lr)
 
-        EPOCH_LOSSES = []
-        for epoch in range(self.config["gbm_head"]["training"]["epochs"]):
+        scheduler_II_cfg["optimizer"] = optimizer_II
+
+        if "eta_min" in scheduler_II_cfg.keys():
+            if scheduler_II_cfg["eta_min"] == "dynamic":
+                scheduler_II_cfg["eta_min"] = eta_min_coef * lr
+        scheduler_II = instantiate(scheduler_II_cfg, scheduler_II)
+        
+        mse_loss_fn = reg_loss_fn()
+        binary_loss_fn = clf_loss_fn()
+ 
+        pos_aligns_II, neg_aligns_II, distance_aligns_II = [], [], []
+        reg_losses_II, clf_losses_II = [], []
+       
+        EPOCHS_II_LOSSES = []
+        for epoch in range(epochs):
             epoch_loss = []
             reg_loss_list = []
             clf_loss_list = []
             
             for idx, batch in enumerate(self.predictive_loader):
-               
+              
                 patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
-               
-                contrastive_outputs, predictive_outputs = self.GbmNet(X_dict)
                 
-                contrastive_loss_batch = (contrastive_outputs, patient_ids, avail_mods)
-
-          
-                contrastive_loss = contrastive_loss_fn(contrastive_loss_batch)
-                # print(predictive_outputs[:,:-2].size(), batch_targets[:,:-1].size())
-                mse_loss = mse_loss_fn(predictive_outputs[:,:-2], batch_targets[:,:-2])
-                binary_loss = binary_loss_fn(binary_act_fn(predictive_outputs[:,-2:]), batch_targets[:,-2:])
+                contrastive_outputs, predictive_outputs = gbmnet(X_dict)
             
-                loss = contrastive_loss + mse_loss + binary_loss
-
-                # Backward pass
+                mse_loss = mse_loss_fn(predictive_outputs[:,:-2], batch_targets[:,:-2])
+                
+                binary_loss = binary_loss_fn(predictive_outputs[:,-2:], batch_targets[:,-2:])
+          
+            
+                loss = mse_loss + binary_loss 
+              
                 loss.backward()
-                optimizer.step()
-
-                # Learning schedule
-                before_lr = optimizer.param_groups[0]["lr"]
-                scheduler.step()
-
-                # Store losses
+                torch.nn.utils.clip_grad_norm_(gbmnet.parameters(), max_norm=10.0)
+             
+                optimizer_II.step()
+              
+                before_lr_II = optimizer_II.param_groups[0]["lr"]
+                scheduler_II.step()
+        
+              
                 epoch_loss.append(loss.item())
                 reg_loss_list.append(mse_loss.item())
                 clf_loss_list.append(binary_loss.item())
+        self.GbmNet=gbmnet
+        self.training_result["phase 2"]={"epoch_loss": epoch_loss,"reg_loss" : reg_loss_list,"clf_loss_list":clf_loss_list}
 
-            print(f"\n\nLearning Rate: {before_lr}")
-            # For monitoring, not actually necessary
-            pos_align = np.mean(contrastive_loss_fn.infonce.pos_alignments)
-            neg_align = np.mean(contrastive_loss_fn.infonce.neg_alignments)
-            print("************************************************ GLOBAL ***********************************************")
-            print(f"Epoch {epoch} total loss: {np.mean(epoch_loss):.4f}".upper())
-            print("*******************************************************************************************************")
 
-            print("************************************************ EMBEDDING QUALITY ***********************************************")
-            print(f"\nEpoch {epoch} Embedding quality (Alignement): {pos_align:.4f}".upper())
-            print(f"Epoch {epoch} Embedding quality (Negative Alignement): {neg_align:.4f}".upper())
-            print(f"Epoch {epoch} Embedding quality (Alignement ratio): {np.abs(pos_align/(neg_align + 1e-8)):.4f}".upper())
-            print("*******************************************************************************************************")
 
-            print("************************************************ PREDICTIVE POWER ************************************************")
-            print(f"Epoch {epoch} MSE loss: {np.mean(reg_loss_list):.4f}".upper())
-            print(f"Epoch {epoch} BCE loss: {np.mean(clf_loss_list):.4f}".upper())
-            print("*******************************************************************************************************")
-            contrastive_loss_fn.infonce.clear_alignments()
-            EPOCH_LOSSES.append(np.mean(epoch_loss))
 
+    
     def __replace_string_by_callable(self,string): 
         """
         
