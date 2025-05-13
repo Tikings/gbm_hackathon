@@ -136,10 +136,13 @@
                         "training" : 
 
                                 {
-                                  "epochs" : 10,
-                                  "batch_size" : 5
-
-
+                                  "epochs" : 50,
+                                  "batch_size" : 5,
+                                  "lr" : 1e-4,
+                                  "scheduler_II_cfg" :  {"T_max":50,
+                                                        "eta_min":"dynamic"},
+                
+                                "eta_min_coef" : 0.01
 
 
                                 }
