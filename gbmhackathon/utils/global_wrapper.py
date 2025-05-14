@@ -15,6 +15,14 @@ import pickle as pkl
 import torch.nn as nn
 from typing import Dict
 from gbmhackathon.utils.module_functions import enforce_signature_types
+from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.metrics import accuracy_score
+from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_predict
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import classification_report
 
 
 
@@ -382,7 +390,7 @@ class ModularModel :
 
     def __phase_2(self) :
         
-        self.predictive_dataset= PredictiveLearningDataset(name_emb=self.config["MME_Model"]["modalities_data"]["modalities"],folder_name=self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"],device=self.config["global_settings"]["device"], dropout=0.35) ### Voir pou rendre paramétrable le dropout
+        self.predictive_dataset= PredictiveLearningDataset(name_emb=self.config["MME_Model"]["modalities_data"]["modalities"],folder_name=self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"],device=self.config["global_settings"]["device"], dropout=0.0) ### Voir pou rendre paramétrable le dropout
         self.predictive_loader= DataLoader(self.predictive_dataset, self.config["gbm_head"]["training"]["batch_size"], shuffle=True, collate_fn=collate_predictive, generator=torch.Generator()) ### Attention : enlevé device à cause de cuda qui fout la merde j'ai pas compris pq
         ### tests
         patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names=next(iter(self.predictive_loader))
@@ -408,7 +416,14 @@ class ModularModel :
              del cfg_training["batch_size"]
              self.__fit_newtork_phase_2(**cfg_training)
 
-        elif self.config["Global_Architecture"]["head"]["type"]==["XGBoost"]:
+        elif self.config["Global_Architecture"]["head"]["type"]=='XGBoost':
+             print("ok!!!")
+             self.__fit_XGBOOST_phase_2()
+
+
+        else : 
+
+            raise Exception("{} not implemented".format(self.config["Global_Architecture"]["head"]["type"]))
 
         
 
@@ -484,11 +499,46 @@ class ModularModel :
         """
         """
         ### On récupère tous les embeddings en sortie du contrastiv
+        print("using : XGBOOST")
+        dataset= PredictiveLearningDataset(name_emb=self.config["MME_Model"]["modalities_data"]["modalities"],folder_name=self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"],device=self.config["global_settings"]["device"], dropout=0.0)
+        
        
-        self.predictive_loader=DataLoader(self.predictive_dataset, self.predictive_dataset.__len__(), shuffle=True, collate_fn=collate_predictive, generator=torch.Generator())
-        patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names=next(iter(self.predictive_dataset))
-        phase_1_output=self.mme(X_dict)
-        print(phase_1_output)
+        self.predictive_loader=DataLoader(dataset, 114, shuffle=True, collate_fn=collate_predictive, generator=torch.Generator())
+        
+        patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names=next(iter(self.predictive_loader))
+        output_mme=self.mme(X_dict)
+        #print(output_mme.keys())
+        #print([i.shape for i in output_mme.values()])
+
+        X=np.hstack(tuple([i.detach().cpu().numpy() for i in output_mme.values()]))
+        #print('formated shape : ',formated_xgb_input.shape)
+        #print('targets: ',batch_targets)
+        ##instanciation_du_model
+        Y=batch_targets.detach().cpu().numpy()
+        for target in range(batch_targets.shape[1]): 
+            print("starting phase 2 for target : ",target)
+            if target in [3,4] : 
+               y=Y[:,target] 
+               model = RandomForestClassifier(n_estimators=100, random_state=42)
+               print("entrinement et cross validation...") 
+               #scores = cross_val_score(model, X, y, cv=10, scoring='accuracy')
+               y_pred = cross_val_predict(model, X, y, cv=10)
+
+               print("Matrice de confusion :\n", confusion_matrix(y, y_pred))
+               print("\nRapport de classification :\n", classification_report(y, y_pred))
+
+               print(y)
+            else : 
+
+                pass
+
+                
+            
+
+   
+
+         
+                
 
     
     def __replace_string_by_callable(self,string): 
