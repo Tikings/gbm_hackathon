@@ -21,7 +21,7 @@ class PatientLearningDataset(Dataset):
                  folder_name : str,
                  root_s3 : Path = ABSTRA_PROJECT_STORAGE_BUCKET, 
                  device: Optional[Union[str, torch.device]] = None,
-                 dropout: float = 0,
+                 dropout: float = 0.0,
                  ):
         self.root = root_s3
         self.name_emb = name_emb
@@ -33,10 +33,12 @@ class PatientLearningDataset(Dataset):
         # Handle device selection - use CUDA if available, otherwise CPU
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+          
         else:
+           
             self.device = torch.device(device)
-        
-        print(f"Using device: {self.device}")
+         
+        print(f"Using device : {self.device}")
 
         self.dict_emb = {}
         for key in self.name_emb.keys(): 

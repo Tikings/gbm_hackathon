@@ -41,9 +41,8 @@ class MME_Global :
         
         
         self.dataset = PatientLearningDataset(self.config["MME_Model"]["modalities_data"]["modalities"], self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"], device=self.device)
-        self.dataloader = DataLoader(self.dataset, self.config["MME_Model"]["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator(device=self.dataset.device))
-        
-        
+        self.dataloader = DataLoader(self.dataset, self.config["MME_Model"]["training"]["batch_size"], shuffle=True, collate_fn=collate_patient_wise, generator=torch.Generator())
+        print("device MME : {}".format(self.device))        
         self.missing_mods=load_s3(self.config["MME_Model"]["modalities_data"]["missing_mods"])
         
         self.id2sample=self.dataset.ind2patient
@@ -344,6 +343,8 @@ class ModularModel :
         self.config=config
         self.__verify_config()
         self.__format_config()
+        self.training_result={}
+    
         
 
 
@@ -369,7 +370,9 @@ class ModularModel :
 
                     MME=MME_Global(self.config,save=False)
                     MME.fit_mme()
+                    self.training_result["phase 1"]=MME.training
                     self.mme=MME.mme
+                    
 
         else : 
              
@@ -380,8 +383,13 @@ class ModularModel :
     def __phase_2(self) :
         
         self.predictive_dataset= PredictiveLearningDataset(name_emb=self.config["MME_Model"]["modalities_data"]["modalities"],folder_name=self.config["MME_Model"]["modalities_data"]["pkl_storage_folder"],device=self.config["global_settings"]["device"], dropout=0.35) ### Voir pou rendre paramétrable le dropout
-        self.predictive_loader= DataLoader(self.predictive_dataset, self.config["gbm_head"]["training"]["batch_size"], shuffle=True, collate_fn=collate_predictive, generator=torch.Generator(device=self.predictive_dataset.device))
-        
+        self.predictive_loader= DataLoader(self.predictive_dataset, self.config["gbm_head"]["training"]["batch_size"], shuffle=True, collate_fn=collate_predictive, generator=torch.Generator()) ### Attention : enlevé device à cause de cuda qui fout la merde j'ai pas compris pq
+        ### tests
+        patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names=next(iter(self.predictive_loader))
+        print("predictive loader (X_dict) device : {}".format(X_dict["hne"].device)) 
+        print("predictive loader (batch_targets) device : {}".format(batch_targets.device)) 
+
+                                                                                       
         
         if self.config["Global_Architecture"]["head"]["type"]== "network" : 
              
@@ -389,73 +397,91 @@ class ModularModel :
              GBM_cfg=self.config["gbm_head"]|{"mme" : self.mme}
              GBM_cfg["mme_cfg"]=self.config["MME_Model"]["architecture"]["MME"]
              if self.config["Global_Architecture"]["MME"]["phase_2_training"] : 
-                 GBM_cfg["freeze_mme"]=True
-            
+                 GBM_cfg["freeze_mme"]=False
+             else : 
+                 GBM_cfg["freeze_mme"]=True  ### Si le mme n'est pas à entraîner en phase 2 (à l'aide du predictive, on le freeze
+             GBM_cfg["head_cfg"]["device"]=self.config["global_settings"]["device"]
+             
              self.GbmNet=instantiate(GBM_cfg,GBMNet)
+    
+             cfg_training=self.config["gbm_head"]["training"] #### A corriger et bien réflechir la structure de la config
+             del cfg_training["batch_size"]
+             self.__fit_newtork_phase_2(**cfg_training)
+
+        else : 
+            raise Exception("A implémenter")
+
+
         
-    def __fit_phase_2(self) : 
+    def __fit_newtork_phase_2(self,lr,epochs,scheduler_II_cfg,eta_min_coef=0.01,scheduler_II=torch.optim.lr_scheduler.CosineAnnealingLR,reg_loss_fn=nn.MSELoss,clf_loss_fn=nn.BCEWithLogitsLoss) : 
 
         """
         
         
         """
+        gbmnet=self.GbmNet
+        if gbmnet.freeze_mme:
+            
+            gbmnet.mme.eval()
+            
+            optimizer_II = Adam(gbmnet.head_net.parameters(), lr=lr)
+        else:
+            
+            optimizer_II = optimizer_II(gbmnet.parameters(), lr=lr)
 
-        EPOCH_LOSSES = []
-        for epoch in range(self.config["gbm_head"]["training"]["epochs"]):
+        scheduler_II_cfg["optimizer"] = optimizer_II
+
+        if "eta_min" in scheduler_II_cfg.keys():
+            if scheduler_II_cfg["eta_min"] == "dynamic":
+                scheduler_II_cfg["eta_min"] = eta_min_coef * lr
+        scheduler_II = instantiate(scheduler_II_cfg, scheduler_II)
+        
+        mse_loss_fn = reg_loss_fn()
+        binary_loss_fn = clf_loss_fn()
+ 
+        pos_aligns_II, neg_aligns_II, distance_aligns_II = [], [], []
+        reg_losses_II, clf_losses_II = [], []
+       
+        EPOCHS_II_LOSSES = []
+        for epoch in range(epochs):
             epoch_loss = []
             reg_loss_list = []
             clf_loss_list = []
             
             for idx, batch in enumerate(self.predictive_loader):
-               
+              
                 patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
-               
-                contrastive_outputs, predictive_outputs = self.GbmNet(X_dict)
                 
-                contrastive_loss_batch = (contrastive_outputs, patient_ids, avail_mods)
-
-          
-                contrastive_loss = contrastive_loss_fn(contrastive_loss_batch)
-                # print(predictive_outputs[:,:-2].size(), batch_targets[:,:-1].size())
+                contrastive_outputs, predictive_outputs = gbmnet(X_dict)
+              
                 mse_loss = mse_loss_fn(predictive_outputs[:,:-2], batch_targets[:,:-2])
-                binary_loss = binary_loss_fn(binary_act_fn(predictive_outputs[:,-2:]), batch_targets[:,-2:])
+                
+                binary_loss = binary_loss_fn(predictive_outputs[:,-2:], batch_targets[:,-2:])
+          
             
-                loss = contrastive_loss + mse_loss + binary_loss
-
-                # Backward pass
+                loss = mse_loss + binary_loss 
+                
+              
                 loss.backward()
-                optimizer.step()
-
-                # Learning schedule
-                before_lr = optimizer.param_groups[0]["lr"]
-                scheduler.step()
-
-                # Store losses
+                torch.nn.utils.clip_grad_norm_(gbmnet.parameters(), max_norm=10.0)
+             
+                optimizer_II.step()
+              
+                before_lr_II = optimizer_II.param_groups[0]["lr"]
+                scheduler_II.step()
+        
+              
                 epoch_loss.append(loss.item())
                 reg_loss_list.append(mse_loss.item())
                 clf_loss_list.append(binary_loss.item())
+            print("epoch {} - loss : {}".format(epoch,loss))
+        self.GbmNet=gbmnet
+        self.training_result["phase 2"]={"epoch_loss": epoch_loss,"reg_loss" : reg_loss_list,"clf_loss_list":clf_loss_list}
 
-            print(f"\n\nLearning Rate: {before_lr}")
-            # For monitoring, not actually necessary
-            pos_align = np.mean(contrastive_loss_fn.infonce.pos_alignments)
-            neg_align = np.mean(contrastive_loss_fn.infonce.neg_alignments)
-            print("************************************************ GLOBAL ***********************************************")
-            print(f"Epoch {epoch} total loss: {np.mean(epoch_loss):.4f}".upper())
-            print("*******************************************************************************************************")
 
-            print("************************************************ EMBEDDING QUALITY ***********************************************")
-            print(f"\nEpoch {epoch} Embedding quality (Alignement): {pos_align:.4f}".upper())
-            print(f"Epoch {epoch} Embedding quality (Negative Alignement): {neg_align:.4f}".upper())
-            print(f"Epoch {epoch} Embedding quality (Alignement ratio): {np.abs(pos_align/(neg_align + 1e-8)):.4f}".upper())
-            print("*******************************************************************************************************")
 
-            print("************************************************ PREDICTIVE POWER ************************************************")
-            print(f"Epoch {epoch} MSE loss: {np.mean(reg_loss_list):.4f}".upper())
-            print(f"Epoch {epoch} BCE loss: {np.mean(clf_loss_list):.4f}".upper())
-            print("*******************************************************************************************************")
-            contrastive_loss_fn.infonce.clear_alignments()
-            EPOCH_LOSSES.append(np.mean(epoch_loss))
 
+    
     def __replace_string_by_callable(self,string): 
         """
         
