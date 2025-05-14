@@ -408,9 +408,9 @@ class ModularModel :
              del cfg_training["batch_size"]
              self.__fit_newtork_phase_2(**cfg_training)
 
-        else : 
-            raise Exception("A implémenter")
+        elif self.config["Global_Architecture"]["head"]["type"]==["XGBoost"]:
 
+        
 
         
     def __fit_newtork_phase_2(self,lr,epochs,scheduler_II_cfg,eta_min_coef=0.01,scheduler_II=torch.optim.lr_scheduler.CosineAnnealingLR,reg_loss_fn=nn.MSELoss,clf_loss_fn=nn.BCEWithLogitsLoss) : 
@@ -479,7 +479,16 @@ class ModularModel :
         self.training_result["phase 2"]={"epoch_loss": epoch_loss,"reg_loss" : reg_loss_list,"clf_loss_list":clf_loss_list}
 
 
+    def __fit_XGBOOST_phase_2(self): 
 
+        """
+        """
+        ### On récupère tous les embeddings en sortie du contrastiv
+       
+        self.predictive_loader=DataLoader(self.predictive_dataset, self.predictive_dataset.__len__(), shuffle=True, collate_fn=collate_predictive, generator=torch.Generator())
+        patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names=next(iter(self.predictive_dataset))
+        phase_1_output=self.mme(X_dict)
+        print(phase_1_output)
 
     
     def __replace_string_by_callable(self,string): 
