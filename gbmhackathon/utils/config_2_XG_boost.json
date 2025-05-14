@@ -31,7 +31,7 @@
                                         "rate":-5, 
                                         "use_all_positives" : false},
                                 "Optimizer" : {
-                                        "lr" : 1e-3}
+                                        "lr" : 1e-5}
 
                 },
 
@@ -45,7 +45,7 @@
                                                                         "layers": [1536, 512, 64],
                                                                         "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
-                                                                        "norm_layer": "torch.nn.LayerNorm"
+                                                                        "norm_layer": "torch.nn.BatchNorm1d"
                                                                 }
 
 
@@ -74,7 +74,7 @@
                                                                         "layers": [1790, 550, 64],
                                                                         "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
-                                                                        "norm_layer": "torch.nn.LayerNorm"
+                                                                        "norm_layer": "torch.nn.BatchNorm1d"
                                                     }
 
                                         },
@@ -84,7 +84,7 @@
                                                                         "layers": [12, 10, 64],
                                                                         "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
-                                                                        "norm_layer": "torch.nn.LayerNorm"
+                                                                        "norm_layer": "torch.nn.BatchNorm1d"
                                                     }
 
                                         },
@@ -93,10 +93,10 @@
                                         {  
                                                 "net_type": "mlp",
                                                 "net_config": {
-                                                                        "layers": [12, 10, 64],
-                                                                        "dropout": 0.65,
+                                                                        "layers": [3072,512,64],
+                                                                        "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
-                                                                        "norm_layer": "torch.nn.LayerNorm"
+                                                                        "norm_layer": "torch.nn.BatchNorm1d"
                                                     }
 
                                         },
@@ -106,10 +106,10 @@
                                         {  
                                                 "net_type": "mlp",
                                                 "net_config": {
-                                                                        "layers": [12, 10, 64],
-                                                                        "dropout": 0.65,
+                                                                        "layers": [3072,512,64],
+                                                                        "dropout": 0.3,
                                                                         "act_fn": "torch.nn.ReLU",
-                                                                        "norm_layer": "torch.nn.LayerNorm"
+                                                                        "norm_layer": "torch.nn.BatchNorm1d"
                                                     }
 
                                         }
@@ -129,7 +129,7 @@
                                                         "layers": ["changer toutes les config ici !!!!!"],
                                                         "dropout": 0.3,
                                                         "act_fn": "torch.nn.ReLU",
-                                                        "norm_layer": "torch.nn.LayerNorm"
+                                                        "norm_layer": "torch.nn.BatchNorm1d"
                                     }
 
                                 
