@@ -345,7 +345,7 @@ class RegularizedInfoNCELoss(nn.Module):
         if smoothing_func:
             self.smoothing_func = SmoothingFunction(bound=self.bound, slope=slope, rate=rate)
         else:
-            self.smoothing_func = nn.Identity()
+            self.smoothing_func = None
         self.alpha = alpha
         self.eps = eps
         # self.rankme_func = RankMe()
@@ -382,7 +382,12 @@ class RegularizedInfoNCELoss(nn.Module):
             combined_penalties = zero_ratios + zero_ratios_per_mod.sum() - norm_penalties
             # torch.clamp(combined_penalties, max=100)
             reg_loss = combined_penalties.sum()
-    
-            return self.smoothing_func(nce_loss - self.alpha * reg_loss)
-        return self.smoothing_func(nce_loss)
+            if self.smoothing_func is not None:
+                return self.smoothing_func(nce_loss - self.alpha * reg_loss)
+            else:
+                return nce_loss - self.alpha * reg_loss
+        if self.smoothing_func is not None:
+            return self.smoothing_func(nce_loss)
+        else:
+            return nce_loss
             

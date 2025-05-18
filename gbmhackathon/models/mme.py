@@ -710,7 +710,10 @@ class RefinementBlock(nn.Module):
                 avail_mods_len: int = 6,
                 avail_mods_dense_size: int = 32,
                 avail_mods_heads: int = 1,
+                cross_mods_fc_size: int = 1024,
+                avail_mods_fc_size: int = 128,
                 act_fn: Callable = nn.GELU,
+                norm_fn: Callable = nn.BatchNorm1d,
                 dropout: float = 0.3,
                 device: Optional[Union[str, torch.device]] = None,
                 ):
@@ -728,6 +731,9 @@ class RefinementBlock(nn.Module):
                                                              dropout=dropout, 
                                                              batch_first=True, 
                                                              device=device)
+        self.cross_modality_enricher_proj = nn.Sequential(nn.Linear(emb_size,cross_mods_fc_size), act_fn(), norm_fn(cross_mods_fc_size),
+                                                     nn.Linear(cross_mods_fc_size, emb_size), act_fn(), norm_fn(emb_size))
+        
         self.available_modality_linear_encoder = nn.Sequential(nn.Linear(avail_mods_len,avail_mods_dense_size),
                                                         act_fn(),
                                                         nn.Linear(avail_mods_dense_size, avail_mods_len))
@@ -737,6 +743,8 @@ class RefinementBlock(nn.Module):
                                                                       dropout=dropout, 
                                                                       batch_first=True, 
                                                                       device=device)
+        self.available_modality_attn_encoder_proj = nn.Sequential(nn.Linear(avail_mods_len,avail_mods_fc_size), act_fn(), norm_fn(avail_mods_fc_size),
+                                                     nn.Linear(avail_mods_fc_size, avail_mods_len), act_fn(), norm_fn(avail_mods_len))
         
         self.available_modality_enricher = nn.MultiheadAttention(emb_size, 
                                                                  num_heads=1, 
@@ -745,6 +753,9 @@ class RefinementBlock(nn.Module):
                                                                  vdim=emb_size, 
                                                                  batch_first=True, 
                                                                  device=device)
+        self.final_projection = nn.Sequential(nn.Linear(emb_size,cross_mods_fc_size),
+                                                act_fn(), norm_fn(cross_mods_fc_size),
+                                                nn.Linear(cross_mods_fc_size, emb_size))
         
 
     def forward(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
@@ -761,26 +772,30 @@ class RefinementBlock(nn.Module):
         cross_modality_enriched, _ = self.cross_modality_enricher(query=patient_embeddings.unsqueeze(1),
                                                               key=patient_embeddings.unsqueeze(1),
                                                               value=patient_embeddings.unsqueeze(1))
+        cross_modality_enriched = self.cross_modality_enricher_proj(cross_modality_enriched.squeeze())
         # Add residual connection
-        cross_modality_enriched = torch.add(cross_modality_enriched, patient_embeddings.unsqueeze(1))
+        cross_modality_enriched = torch.add(cross_modality_enriched, patient_embeddings)
         # print("cross_mod_enriched", cross_modality_enriched.size())
+        
         # Represent available modality statuses
         avail_mods_embeddings_linear = self.available_modality_linear_encoder(avail_mods)
         # print("avail_mods_linear", avail_mods_embeddings_linear.size())
         avail_mods_embeddings, _ = self.available_modality_attn_encoder(query=avail_mods_embeddings_linear.unsqueeze(1),
                                                                     key=avail_mods_embeddings_linear.unsqueeze(1),
                                                                     value=avail_mods_embeddings_linear.unsqueeze(1))
+        avail_mods_embeddings = self.available_modality_attn_encoder_proj(avail_mods_embeddings.squeeze())
+        
         # Add residual connection
-        avail_mods_embeddings = torch.add(avail_mods_embeddings.squeeze(), avail_mods_embeddings_linear)
+        avail_mods_embeddings = torch.add(avail_mods_embeddings, avail_mods_embeddings_linear)
         # print("avail_mods_emb", avail_mods_embeddings.size())
 
         # Incorporate available modality status
-        final_representations, _ = self.available_modality_enricher(query=cross_modality_enriched, 
+        final_representations, _ = self.available_modality_enricher(query=cross_modality_enriched.unsqueeze(1), 
                                                                  key=avail_mods_embeddings.unsqueeze(1), 
-                                                                 value=cross_modality_enriched)
-
+                                                                 value=cross_modality_enriched.unsqueeze(1))
+        final_representations = self.final_projection(final_representations.squeeze())
         # Add residual connection
-        final_representations = torch.add(final_representations.squeeze(), cross_modality_enriched.squeeze())
+        final_representations = torch.add(final_representations, cross_modality_enriched)
         # print("final_repr", final_representations.size())
         return final_representations
 
