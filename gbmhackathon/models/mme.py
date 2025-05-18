@@ -703,6 +703,118 @@ class MultiModalEncoder(nn.Module):
             outputs[modality] = self.modality_net_map[modality](x[modality])
         return outputs
 
+class RefinementBlock(nn.Module):
+    @enforce_signature_types
+    def __init__(self, emb_size: int,
+                cross_modality_heads: int = 2,
+                avail_mods_len: int = 6,
+                avail_mods_dense_size: int = 32,
+                avail_mods_heads: int = 1,
+                act_fn: Callable = nn.GELU,
+                dropout: float = 0.3,
+                device: Optional[Union[str, torch.device]] = None,
+                ):
+        super().__init__()
+        # Handle device selection - use CUDA if available, otherwise CPU
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+        
+        print(f"Using device: {self.device}")
+
+        self.cross_modality_enricher = nn.MultiheadAttention(emb_size, 
+                                                             cross_modality_heads, 
+                                                             dropout=dropout, 
+                                                             batch_first=True, 
+                                                             device=device)
+        self.available_modality_linear_encoder = nn.Sequential(nn.Linear(avail_mods_len,avail_mods_dense_size),
+                                                        act_fn(),
+                                                        nn.Linear(avail_mods_dense_size, avail_mods_len))
+                                                        
+        self.available_modality_attn_encoder = nn.MultiheadAttention(avail_mods_len, 
+                                                                      avail_mods_heads, 
+                                                                      dropout=dropout, 
+                                                                      batch_first=True, 
+                                                                      device=device)
+        
+        self.available_modality_enricher = nn.MultiheadAttention(emb_size, 
+                                                                 num_heads=1, 
+                                                                 dropout=dropout, 
+                                                                 kdim=avail_mods_len, 
+                                                                 vdim=emb_size, 
+                                                                 batch_first=True, 
+                                                                 device=device)
+        
+
+    def forward(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
+        # Create patient representations across modalities by concatenation
+        concatenated_tensors = []
+        for idx in range(x[list(x.keys())[0]].size(0)):
+            patient_representation = []
+            for modality in x.keys():
+                patient_representation.append(x[modality][idx].view(-1))
+            concatenated_tensors.append(torch.cat(patient_representation, dim=0).unsqueeze(0))
+        patient_embeddings = torch.cat(concatenated_tensors, dim=0)
+        # print("patient_embs", patient_embeddings.size())
+        # Incorporate cross-modality self attention
+        cross_modality_enriched, _ = self.cross_modality_enricher(query=patient_embeddings.unsqueeze(1),
+                                                              key=patient_embeddings.unsqueeze(1),
+                                                              value=patient_embeddings.unsqueeze(1))
+        # Add residual connection
+        cross_modality_enriched = torch.add(cross_modality_enriched, patient_embeddings.unsqueeze(1))
+        # print("cross_mod_enriched", cross_modality_enriched.size())
+        # Represent available modality statuses
+        avail_mods_embeddings_linear = self.available_modality_linear_encoder(avail_mods)
+        # print("avail_mods_linear", avail_mods_embeddings_linear.size())
+        avail_mods_embeddings, _ = self.available_modality_attn_encoder(query=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                    key=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                    value=avail_mods_embeddings_linear.unsqueeze(1))
+        # Add residual connection
+        avail_mods_embeddings = torch.add(avail_mods_embeddings.squeeze(), avail_mods_embeddings_linear)
+        # print("avail_mods_emb", avail_mods_embeddings.size())
+
+        # Incorporate available modality status
+        final_representations, _ = self.available_modality_enricher(query=cross_modality_enriched, 
+                                                                 key=avail_mods_embeddings.unsqueeze(1), 
+                                                                 value=cross_modality_enriched)
+
+        # Add residual connection
+        final_representations = torch.add(final_representations.squeeze(), cross_modality_enriched.squeeze())
+        # print("final_repr", final_representations.size())
+        return final_representations
+
+class PredictiveModule(nn.Module):
+    @enforce_signature_types
+    def __init__(self,
+                heads_configs: Dict[str, Dict]):
+        super().__init__()
+        self.hydra = nn.ModuleDict()
+        for task, cfg in heads_configs.items():
+            self.hydra[task] = instantiate(cfg, PredictionHead)
+
+    def forward(self, x: torch.Tensor):
+        outputs = {}
+        for task in self.hydra.keys():
+            outputs[task] = self.hydra[task](x)
+        return outputs
+            
+    
+class ClinicalLinkageModule(nn.Module):
+    @enforce_signature_types
+    def __init__(self,
+                refinement_cfg: Dict,
+                predictive_cfg: Dict):
+        super().__init__()
+        self.refinement_block = instantiate(refinement_cfg, RefinementBlock)
+        self.predictive_module = instantiate(predictive_cfg, PredictiveModule)
+        
+    def forward(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
+        patient_embeddings = self.refinement_block(x, avail_mods)
+
+        task_outputs = self.predictive_module(patient_embeddings)
+        return task_outputs, patient_embeddings
+        
 class GBMNet(nn.Module):
     """Global model to learn predictive tasks"""
     @enforce_signature_types
