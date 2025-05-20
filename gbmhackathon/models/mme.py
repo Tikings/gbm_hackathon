@@ -855,7 +855,7 @@ class PredictiveModule(nn.Module):
     def __init__(self,
                 heads_configs: Dict[str, Dict]):
         super().__init__()
-        self.config = {'heads_configs', heads_configs}
+        self.config = {'heads_configs': heads_configs}
         self.hydra = nn.ModuleDict()
         for task, cfg in heads_configs.items():
             self.hydra[task] = instantiate(cfg, PredictionHead)
