@@ -49,6 +49,27 @@ import datetime
 import re
 from typing import Dict, Tuple, Optional, Union
 
+recurrent_map = {'HK_G_017b': 'HK_G_016',
+ 'HK_G_029b': 'HK_G_028',
+ 'HK_G_036b': 'HK_G_035',
+ 'HK_G_044b': 'HK_G_043',
+ 'HK_G_059b': 'HK_G_058',
+ 'HK_G_061b': 'HK_G_060',
+ 'HK_G_079b': 'HK_G_078',
+ 'HK_G_082b': 'HK_G_081',
+ 'HK_G_084b': 'HK_G_083',
+ 'HK_G_086b': 'HK_G_085',
+ 'HK_G_090b': 'HK_G_089',
+ 'HK_G_092b': 'HK_G_091',
+ 'HK_G_096b': 'HK_G_095',
+ 'HK_G_098b': 'HK_G_098',
+ 'HK_G_100b': 'HK_G_099',
+ 'HK_G_105b': 'HK_G_104',
+ 'HK_G_109b': 'HK_G_108',
+ 'HK_G_111b': 'HK_G_110',
+ 'HK_G_113b': 'HK_G_112',
+ 'HK_G_115b': 'HK_G_114'}
+
 
 def identify_sample_id(sample_id: str) -> bool:
     """Identify if a sample is recurrent based on its ID."""
@@ -74,10 +95,10 @@ def get_recurrent_info(sample_id: str) -> int:
     return 1 if sample_id.endswith("b") else 0
 
 
-def get_data() -> pd.DataFrame:
+def get_data(key: str = "processed gbm clinical") -> pd.DataFrame:
     """Load and return the clinical dataset using MosaicDataset."""
     source_dict_mosaic = MosaicDataset.load_tabular()
-    return source_dict_mosaic["clinical"]["processed gbm clinical"]
+    return source_dict_mosaic["clinical"][key]
 
 
 def load_data(
@@ -111,7 +132,84 @@ def impute_col(col):
         return col.fillna(-1)
     else:
         return col.fillna("Unk")
-        
+
+def create_treatment_feature(feature_dico, treatment_df, recurrent_map):
+    key = list(feature_dico.keys())[0]
+    intermediate_df = pd.DataFrame(feature_dico, index=treatment_df['patient_id'].unique())
+    
+    true_pid = [ f'{PID}a' for PID in treatment_df['patient_id'].unique()]
+    
+    extension = [intermediate_df.loc[root_pid].iloc[0] for root_pid in recurrent_map.values()]
+    extension_pid = [rec_pid for rec_pid in recurrent_map.keys()]
+    feature_dico[key].extend(extension)
+    return pd.DataFrame(feature_dico, index=true_pid + extension_pid)
+    
+def new_prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
+    """
+    Prepare clinical data by handling inconsistencies, defining features, and imputing missing values.
+
+    Returns:
+        Tuple containing:
+            - Processed DataFrame with corrections and missing values handled.
+            - List of categorical feature names.
+            - List of numerical feature names.
+            - List of target column names.
+    """
+    # TODO: ADD TREATMENT INPUT FEATURES
+    gbm_df = get_data()
+    gbm_df["corrected_patient_id"] = gbm_df.index.map(correct_patient_id)
+    gbm_df["recurrent_sample"] = gbm_df.index.map(get_recurrent_info)
+
+    NUM_TARGETS = [
+        "os_years",
+        "pfs_years",
+    ]
+    CAT_TARGET = ["recurrent_sample", "mgmt_promoter_methylation"]
+    TARGETS = NUM_TARGETS + CAT_TARGET
+
+    cat_features = [col for col in gbm_df.columns if gbm_df[col].nunique() <= 10]
+    
+    not_features = [
+        "cohort_code",
+        "cancer_indication",
+        "sample_source",
+        "sample_origin",
+        "tumour_resection_chronology",
+        "sample_collection_chronology",
+    ]
+    cat_features = [col for col in cat_features if col not in not_features + TARGETS]
+
+    num_features = [
+        col for col in gbm_df.columns if col not in cat_features + not_features + TARGETS
+    ]
+    num_features.remove("corrected_patient_id")
+    
+    num_features.remove("patient_id")
+
+    # Replace categorical NAs with a new modality: -1 for numeric ordinal features and "Unk" for string categorical
+    gbm_df[cat_features] = gbm_df[cat_features].apply(impute_col, axis=0)
+
+    # Create treatment features
+    treatment_df = get_data("treatments")
+
+    feature_dico = {"care_pathway":[','.join(list(treatment_df[treatment_df['patient_id'] == PID]['treatment_type'])) for PID in treatment_df['patient_id'].unique()]}
+    care_pathway = create_treatment_feature(feature_dico, treatment_df, recurrent_map)
+    feature_dico = {"n_treatments":[len(treatment_df[treatment_df['patient_id'] == PID]['treatment_type']) for PID in treatment_df['patient_id'].unique()]}
+    n_treatments = create_treatment_feature(feature_dico, treatment_df, recurrent_map)
+    feature_dico = {"has_lived_toxic_event":['Yes' in list(treatment_df[treatment_df['patient_id'] == PID]['toxicity_event']) for PID in treatment_df['patient_id'].unique()]}
+    has_lived_toxic = create_treatment_feature(feature_dico, treatment_df, recurrent_map)
+    
+    years_before_treatment = []
+    for treatment_type in treatment_df['treatment_type'].unique():
+        feature_dico = {f"years_before_1st_{treatment_type}":[(list(treatment_df[(treatment_df['patient_id'] == PID) & (treatment_df['treatment_type'] == treatment_type)]['time_interval_between_diagnosis_treatment_start_years']) + [-1])[0] for PID in treatment_df['patient_id'].unique()]}
+        yrs_before_df = create_treatment_feature(feature_dico, treatment_df, recurrent_map)
+        years_before_treatment.append(yrs_before_df)
+    treatment_features = [care_pathway, n_treatments, has_lived_toxic] + years_before_treatment
+    treatment_features = pd.concat(treatment_features, axis=1)
+    treatment_features["sample_id"] = treatment_features.index
+    treatment_features.set_index("sample_id", inplace=True)
+    return gbm_df, cat_features, num_features, TARGETS, treatment_features
+    
 def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
     """
     Prepare clinical data by handling inconsistencies, defining features, and imputing missing values.
@@ -142,6 +240,7 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
         "sample_source",
         "sample_origin",
         "tumour_resection_chronology",
+        "sample_collection_chronology",
     ]
     cat_features = [col for col in cat_features if col not in not_features + TARGETS]
 
@@ -158,7 +257,7 @@ def prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
 
 
 def pipeline_clinical(
-    mca: bool = False, n_components : int = 10, verbose: bool = False, save: bool = False, save_path: str = "clinical_data.pt"
+    mca: bool = False, mode: str = 'old', n_components : int = 10, verbose: bool = False, save: bool = False, save_path: str = "clinical_data.pt"
 ) -> Dict[str, Union[Dict, Dict[str, torch.Tensor]]]:
     """
     Process clinical data, compute embeddings, and save the output.
@@ -180,11 +279,23 @@ def pipeline_clinical(
     """
     if verbose:
         print("Preparing Data...")
-    gbm_df, cat_features, num_features, targets = prepare_data()
+    if mode == 'old':
+        gbm_df, cat_features, num_features, targets = prepare_data()
+        cat_targets = ["recurrent_sample"]
+    else:
+        gbm_df, cat_features, num_features, targets, treatment_features = new_prepare_data()
 
     cat_gbm_df = gbm_df[cat_features]
+
+    if mode != 'old':
+        cat_gbm_df = cat_gbm_df.join(treatment_features[["has_lived_toxic_event", "care_pathway"]])
+        cat_features = list(cat_gbm_df.columns)
+        cat_targets = ["recurrent_sample", "mgmt_promoter_methylation"]
     num_gbm_df = gbm_df[num_features]
     target_df = gbm_df[targets]
+
+    if mode != 'old':
+        target_df['mgmt_promoter_methylation'] = np.where(target_df['mgmt_promoter_methylation'] == 'Methylated', 1, 0)
 
     if verbose:
         print("Imputing numerical features...")
@@ -192,7 +303,10 @@ def pipeline_clinical(
     imputed_num_gbm_df = pd.DataFrame(
         knn.fit_transform(num_gbm_df), columns=num_features, index=num_gbm_df.index
     )
-
+    if mode != 'old':
+        imputed_num_gbm_df = imputed_num_gbm_df.join(treatment_features[[col for col in treatment_features.columns if col not in ["has_lived_toxic_event", "care_pathway"]]])
+        num_features = list(imputed_num_gbm_df.columns)
+        
     if verbose:
         print("Scaling numerical features...")
     scaler = StandardScaler()
@@ -221,18 +335,22 @@ def pipeline_clinical(
         print("Imputing targets..")
     # Replace NAs in target
     imputed_targets = pd.DataFrame(
-        knn.fit_transform(target_df), columns=targets, index=target_df.index
+        knn.fit_transform(target_df[[col for col in targets if col not in cat_targets]]), 
+        columns=[col for col in targets if col not in cat_targets], 
+        index=target_df.index
     )
 
     if verbose:
         print("Scaling targets..")
     # Normalize targets
     norm_target_df = pd.DataFrame(
-        scaler.fit_transform(imputed_targets[[col for col in targets if col != "recurrent_sample"]]),
-        columns=[col for col in targets if col != "recurrent_sample"],
+        scaler.fit_transform(imputed_targets),
+        columns=[col for col in targets if col not in cat_targets],
         index=target_df.index,
     )
-    norm_target_df = pd.concat([norm_target_df, imputed_targets[["recurrent_sample"]]], axis=1)
+    print("norm_target_df", norm_target_df)
+    print("target_df[cat_targets]", target_df[cat_targets])
+    norm_target_df = pd.concat([norm_target_df, target_df[cat_targets]], axis=1)
 
     id2row = {patient_id: i for i, patient_id in enumerate(gbm_df.index)}
     dataset = {
