@@ -117,6 +117,11 @@ class MLP(nn.Module):
             that share the same dimensionality to help gradient flow.
         """
         super().__init__()
+        self.config = {'layers': layers,
+        'dropout': dropout,
+        'act_fn': act_fn,
+        'norm_layer': norm_layer,
+        'enable_residuals':enable_residuals}
         
         self.layers_arg = layers
         self.dropout_arg = dropout
@@ -262,6 +267,7 @@ class DropPath(nn.Module):
     @enforce_signature_types
     def __init__(self, drop_prob: float = 0.0):
         super().__init__()
+        self.config = {'drop_prob': drop_prob}
         self.drop_prob = drop_prob
         self.check_args()
         
@@ -274,6 +280,9 @@ class DropPath(nn.Module):
         return x.div(keep_prob) * mask
 
 class GEGLU(nn.Module):
+    def __ini__(self):
+        super().__init__()
+        self.config = {}
     def forward(self, x):
         x, gate = x.chunk(2, dim=-1)
         return x * F.gelu(gate)
@@ -290,6 +299,12 @@ class AttentionBlock(nn.Module):
         drop_path: float = 0.0,
     ):
         super().__init__()
+        self.config = {'dim': dim,
+        'num_heads': num_heads,
+        'qkv_bias': qkv_bias,
+        'attn_dropout': attn_dropout,
+        'proj_dropout': proj_dropout,
+        'drop_path': drop_path}
         self.dim = dim
         self.num_heads = num_heads
         head_dim = self.dim // self.num_heads
@@ -342,6 +357,10 @@ class FeedForward(nn.Module):
         drop_path: float = 0.0,
     ):
         super().__init__()
+        self.config = {'dim': dim,
+                      'hidden_dim': hidden_dim,
+                      'dropout': dropout,
+                      'drop_path': drop_path}
         self.norm = nn.LayerNorm(dim)
         self.fc1 = nn.Linear(dim, hidden_dim * 2)
         self.act = GEGLU()
@@ -405,6 +424,15 @@ class AttentionNetwork(nn.Module):
             Drop path probability used for stochastic depth regularization.
         """
         super().__init__()
+        self.config = {'dim': dim,
+        'depth': depth,
+        'num_heads': num_heads,
+        'mlp_ratio': mlp_ratio,
+        'qkv_bias': qkv_bias,
+        'attn_dropout': attn_dropout,
+        'proj_dropout': proj_dropout,
+        'mlp_dropout': mlp_dropout,
+        'drop_path_rate': drop_path_rate}
         # stochastic depth scheduling
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
@@ -483,7 +511,14 @@ class GraphEncoder(nn.Module):
             Number of attention heads in the GAT layer.
         """
         super().__init__()
-
+        self.config = {'in_channels' : in_channels,
+                'hidden_channels' : hidden_channels,
+                'out_channels' : out_channels,
+                'dropout' : dropout,
+                'mean_pool' : mean_pool, 
+                'activation_post_gat' : activation_post_gat,
+                'att_agg_activation' : att_agg_activation,
+                'heads' : heads}
         self.gat = GATConv(in_channels, hidden_channels, heads=heads, concat=True)
         self.dropout = nn.Dropout(dropout)
 
@@ -618,6 +653,11 @@ class AuxilliaryClassifier(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        self.config = {'layers': layers,
+        'dropout': dropout,
+        'act_fn': act_fn,
+        'norm_layer': norm_layer,
+        'device': device}
         # Handle device selection - use CUDA if available, otherwise CPU
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -652,7 +692,7 @@ class MultiModalEncoder(nn.Module):
         self.wes_cfg = wes_cfg
         self.clinical_cfg = clinical_cfg
 
-        self.global_cfg = {"hne_cfg": self.hne_cfg,
+        self.config = {"hne_cfg": self.hne_cfg,
                              "spatial_cfg":self.spatial_cfg,
                              "sc_cfg":self.sc_cfg,
                              "bulk_cfg":self.bulk_cfg,
@@ -725,7 +765,18 @@ class RefinementBlock(nn.Module):
             self.device = torch.device(device)
         
         print(f"Using device: {self.device}")
-
+        self.config = {'emb_size': emb_size,
+                'cross_modality_heads': cross_modality_heads,
+                'avail_mods_len': avail_mods_len,
+                'avail_mods_dense_size': avail_mods_dense_size,
+                'avail_mods_heads': avail_mods_heads,
+                'cross_mods_fc_size': cross_mods_fc_size,
+                'avail_mods_fc_size': avail_mods_fc_size,
+                'act_fn': act_fn,
+                'norm_fn': norm_fn,
+                'dropout': dropout,
+                'device': device}
+        
         self.cross_modality_enricher = nn.MultiheadAttention(emb_size, 
                                                              cross_modality_heads, 
                                                              dropout=dropout, 
@@ -804,6 +855,7 @@ class PredictiveModule(nn.Module):
     def __init__(self,
                 heads_configs: Dict[str, Dict]):
         super().__init__()
+        self.config = {'heads_configs', heads_configs}
         self.hydra = nn.ModuleDict()
         for task, cfg in heads_configs.items():
             self.hydra[task] = instantiate(cfg, PredictionHead)
@@ -821,6 +873,9 @@ class ClinicalLinkageModule(nn.Module):
                 refinement_cfg: Dict,
                 predictive_cfg: Dict):
         super().__init__()
+        self.config = {'refinement_cfg': refinement_cfg,
+                       'predictive_cfg': predictive_cfg}
+        
         self.refinement_block = instantiate(refinement_cfg, RefinementBlock)
         self.predictive_module = instantiate(predictive_cfg, PredictiveModule)
         
@@ -842,6 +897,12 @@ class GBMNet(nn.Module):
                  freeze_mme: bool = False,
                 ):
         super().__init__()
+        self.config = {'head_cfg':head_cfg,
+                      'mme':mme,
+                      'load_mme':load_mme,
+                      'mme_path':mme_path,
+                      'mme_cfg':mme_cfg,
+                      'freeze_mme':freeze_mme}
         # Store configs
         self.head_cfg = head_cfg
         self.load_mme = load_mme

@@ -9,6 +9,8 @@ import torch
 
 from typing import Union, Optional, List, Dict, Tuple
 import os
+import warnings
+warnings.filterwarnings("ignore")
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -502,7 +504,7 @@ def see_emb(batch_all=None, gbmnet=None, reducer='tsne', patient_embs=None):
         FLAG = None
         # Activate inference mode
         gbmnet.eval()
-        out_dict, _ = gbmnet(batch_all[2])
+        out_dict = gbmnet(batch_all[2])
         mme_embs, sep_mod_embs = [], []
         mod_info, patient_info = {}, {}
         idx = 0
