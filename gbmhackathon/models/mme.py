@@ -700,32 +700,41 @@ class MultiModalEncoder(nn.Module):
                              "clinical_cfg": self.clinical_cfg}
         
         self.modality_net_map = nn.ModuleDict()
+        devices = []
         # Instantiate architecture
         if self.hne_cfg is not None:
             print(self.hne_cfg)
             self.hne_net = instantiate(self.hne_cfg, ModalityEncoder)
+            devices.append(str(self.hne_net.device))
             self.modality_net_map["hne"] = self.hne_net
             
         if self.spatial_cfg is not None:
             self.spatial_net = instantiate(self.spatial_cfg, ModalityEncoder)
+            devices.append(str(self.spatial_net.device))
             self.modality_net_map["spatial"] = self.spatial_net
             
         if self.sc_cfg is not None:
             self.sc_net = instantiate(self.sc_cfg, ModalityEncoder)
+            devices.append(str(self.sc_net.device))
             self.modality_net_map["scRNA"] = self.sc_net
             
         if self.bulk_cfg is not None:
             self.bulk_net = instantiate(self.bulk_cfg, ModalityEncoder)
+            devices.append(str(self.bulk_net.device))
             self.modality_net_map["bulk"] = self.bulk_net
             
         if self.wes_cfg is not None:
             self.wes_net = instantiate(self.wes_cfg, ModalityEncoder)
+            devices.append(str(self.wes_net.device))
             self.modality_net_map["wes"] = self.wes_net
             
         if self.clinical_cfg is not None:
             self.clinical_net = instantiate(self.clinical_cfg, ModalityEncoder)
+            devices.append(str(self.clinical_net.device))
             self.modality_net_map["clinical"] = self.clinical_net
-
+        
+        assert len(list(np.unique(devices))), f"All encoders should be on the same device, currently : {devices}."
+        self.device = self.modality_net_map[list(self.modality_net_map.keys())[0]].device
     # def forward(self, x: Dict[str, torch.Tensor]):
     #     futures: Dict[str, Future[torch.Tensor]] = {}
     #     for name, net in self.modality_net_map.items():
@@ -857,8 +866,12 @@ class PredictiveModule(nn.Module):
         super().__init__()
         self.config = {'heads_configs': heads_configs}
         self.hydra = nn.ModuleDict()
+        devices = []
         for task, cfg in heads_configs.items():
             self.hydra[task] = instantiate(cfg, PredictionHead)
+            devices.append(str(self.hydra[task].device))
+        assert len(list(np.unique(devices))) == 1, f"All heads must be on the same device. Currently : {devices}."
+        self.device = self.hydra[list(self.hydra.keys())[0]].device
 
     def forward(self, x: torch.Tensor):
         outputs = {}
@@ -878,7 +891,8 @@ class ClinicalLinkageModule(nn.Module):
         
         self.refinement_block = instantiate(refinement_cfg, RefinementBlock)
         self.predictive_module = instantiate(predictive_cfg, PredictiveModule)
-        
+        assert self.refinement_block.device == self.predictive_module.device, f"Refinement block (on {self.refinement_block.device}) and predictive module (on {self.predictive_module.device}) must have the same device."
+        self.device = self.refinement_block.device
     def forward(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
         patient_embeddings = self.refinement_block(x, avail_mods)
 

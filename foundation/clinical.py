@@ -159,7 +159,7 @@ def new_prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
     gbm_df = get_data()
     gbm_df["corrected_patient_id"] = gbm_df.index.map(correct_patient_id)
     gbm_df["recurrent_sample"] = gbm_df.index.map(get_recurrent_info)
-
+    
     NUM_TARGETS = [
         "os_years",
         "pfs_years",
@@ -187,7 +187,7 @@ def new_prepare_data() -> Tuple[pd.DataFrame, list, list, list]:
     num_features.remove("patient_id")
 
     # Replace categorical NAs with a new modality: -1 for numeric ordinal features and "Unk" for string categorical
-    gbm_df[cat_features] = gbm_df[cat_features].apply(impute_col, axis=0)
+    gbm_df[cat_features + CAT_TARGET] = gbm_df[cat_features + CAT_TARGET].apply(impute_col, axis=0)
 
     # Create treatment features
     treatment_df = get_data("treatments")
@@ -295,8 +295,10 @@ def pipeline_clinical(
     target_df = gbm_df[targets]
 
     if mode != 'old':
-        target_df['mgmt_promoter_methylation'] = np.where(target_df['mgmt_promoter_methylation'] == 'Methylated', 1, 0)
-
+        target_df.loc[:, 'mgmt_promoter_methylation'] = np.where(target_df['mgmt_promoter_methylation'] == 'Unmethylated', 0, target_df['mgmt_promoter_methylation'])
+        target_df.loc[:, 'mgmt_promoter_methylation'] = np.where(target_df['mgmt_promoter_methylation'] == 'Methylated', 1, target_df['mgmt_promoter_methylation'])
+        target_df.loc[:, 'mgmt_promoter_methylation'] = np.where(target_df['mgmt_promoter_methylation'] == 'Unk', 2, target_df['mgmt_promoter_methylation'])
+        print(target_df['mgmt_promoter_methylation'])
     if verbose:
         print("Imputing numerical features...")
     knn = KNNImputer()
@@ -348,10 +350,11 @@ def pipeline_clinical(
         columns=[col for col in targets if col not in cat_targets],
         index=target_df.index,
     )
-    print("norm_target_df", norm_target_df)
-    print("target_df[cat_targets]", target_df[cat_targets])
+    # print("norm_target_df", norm_target_df)
+    # print("target_df[cat_targets]", target_df[cat_targets])
     norm_target_df = pd.concat([norm_target_df, target_df[cat_targets]], axis=1)
-
+    norm_target_df = norm_target_df.astype(float)
+    
     id2row = {patient_id: i for i, patient_id in enumerate(gbm_df.index)}
     dataset = {
         "id2row": id2row,
@@ -361,9 +364,9 @@ def pipeline_clinical(
         "targets": targets,
         'mca_contributions':cat_col_contributions,
         "X": torch.tensor(complete_df.values),
-        "Y": torch.tensor(norm_target_df.values),
+        "Y": torch.tensor(norm_target_df.values.astype(float)),
         "imputed_Y": torch.tensor(imputed_targets.values),
-        "original_Y": torch.tensor(target_df.values),
+        "original_Y": torch.tensor(target_df.values.astype(float)),
     }
 
     settings = {

@@ -76,4 +76,5 @@ def load_s3(s3_path : str) :
             obj = pickle.load(f)
         return obj
     except Exception as e :
+        raise e
         print(f"Error to load {s3_path} : {e}")

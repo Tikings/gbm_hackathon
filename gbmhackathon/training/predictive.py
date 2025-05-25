@@ -14,6 +14,7 @@ from itertools import product
 
 ABSTRA_PROJECT_STORAGE_BUCKET = "s3://abstra-project-storage-lttemftb/1b75dc89-ad27-4a65-9e7f-877d1b4f36fc"
 PATTERN_PATIENT = "(HK_G_[0-9]{3}(a|b))"
+POSSIBLE_CLF_TARGETS = ["recurrent_sample", "mgmt_promoter_methylation"]
 
 class PredictiveLearningDataset(Dataset):
     def __init__(self,
@@ -57,6 +58,9 @@ class PredictiveLearningDataset(Dataset):
                     self.dict_emb[key] = clinical_data["data"]
                     id2row = clinical_data['dataset']['id2row']
                     Y = clinical_data["dataset"]['Y']
+                    cat_features = clinical_data["dataset"]['cat_features']
+                    targets = clinical_data["dataset"]['targets']
+                    self.clf_targets_info = {clf_target:list(torch.unique(Y[:,targets.index(clf_target)])) for clf_target in set(targets).intersection(set(POSSIBLE_CLF_TARGETS))}
                     self.targets_names = clinical_data["dataset"]['targets']
                     self.dict_targets = {pid:Y[id2row[pid],:] for pid in id2row.keys()}
                 else:
@@ -204,7 +208,7 @@ class PredictiveLearningDataset(Dataset):
         return patient, dict_patient, torch.Tensor(list_available).to(torch.int8), self.device
         
     def __getitem__(self, idx):
-        return self.inputs[idx], self.targets[idx], self.targets_names
+        return self.inputs[idx], self.targets[idx], self.targets_names, self.clf_targets_info
             
 
 def batcher_graphs(
@@ -228,6 +232,7 @@ def batcher_graphs(
 
 def collate_predictive(batch): 
     targets_names = batch[0][2]
+    clf_targets_info = batch[0][3]
     # Fetch target tensor per patients
     list_targets = [patient[1] for patient in batch]
     list_patient = [patient[0][0] for patient in batch]
@@ -271,18 +276,33 @@ def collate_predictive(batch):
             dict_batched["spatial"] = batcher_graphs(spatial_stack, connectivities_stack)
     device = dict_batched[list(dict_batched.keys())[0]].device
     available_mod_tensor = torch.stack(list_available).type(torch.float32).to(device)
-    class_0 = [(torch.tensor(0).unsqueeze(0) if c[-1] != 0 else torch.tensor(1).unsqueeze(0)) for c in list_targets]
-    class_1 = [(torch.tensor(0).unsqueeze(0) if c[-1] != 1 else torch.tensor(1).unsqueeze(0)) for c in list_targets]
+    # class_0 = [(torch.tensor(0).unsqueeze(0) if c[-1] != 0 else torch.tensor(1).unsqueeze(0)) for c in list_targets]
+    # class_1 = [(torch.tensor(0).unsqueeze(0) if c[-1] != 1 else torch.tensor(1).unsqueeze(0)) for c in list_targets]
     
-    class_0_targets_tensor = torch.stack(class_0).type(torch.float32).to(device)
-    # print(class_0_targets_tensor.size())
-    class_1_targets_tensor = torch.stack(class_1).type(torch.float32).to(device)
+    # class_0_targets_tensor = torch.stack(class_0).type(torch.float32).to(device)
+    # # print(class_0_targets_tensor.size())
+    # class_1_targets_tensor = torch.stack(class_1).type(torch.float32).to(device)
     
-    class_targets_tensor = torch.cat([class_0_targets_tensor, class_1_targets_tensor], dim=1).to(device)
-    reg_targets_tensor = torch.stack([tensor[:-1] for tensor in list_targets]).type(torch.float32).to(device)
-    targets_tensor = torch.cat([reg_targets_tensor, class_targets_tensor], dim=1).to(device)
+    # class_targets_tensor = torch.cat([class_0_targets_tensor, class_1_targets_tensor], dim=1).to(device)
+    clf_targets_tensor = make_targets_tensor(list_targets, clf_targets_info, device)
+    reg_targets_tensor = torch.stack([tensor[:-len(clf_targets_info.keys())] for tensor in list_targets]).type(torch.float32).to(device)
+    targets_tensor = torch.cat([reg_targets_tensor, clf_targets_tensor], dim=1).to(device)
     return list_patient, modalities, dict_batched, available_mod_tensor, targets_tensor, targets_names
 
+def make_targets_tensor(list_targets: List, clf_target_info: Dict, device: Union[str, torch.device]):
+    clf_targets = list(clf_target_info.keys())
+    final_tensor = []
+    for target in clf_targets:
+        to_cat = []
+        for i, u_val in enumerate(clf_target_info[target]):
+            tensor = [(torch.tensor(0).unsqueeze(0) if c[-1] != u_val else torch.tensor(1).unsqueeze(0)) for c in list_targets]
+            u_val_targets_tensor = torch.stack(tensor).type(torch.float32).to(device)
+            to_cat.append(u_val_targets_tensor)
+        
+        clf_target_tensor = torch.cat(to_cat, dim=1).to(device)
+        final_tensor.append(clf_target_tensor)
+    return torch.cat(final_tensor, dim=1).type(torch.float32).to(device)
+    
 # def collate_predictive_colearning(batch): 
 #     batch, y, targets_names = batch
 

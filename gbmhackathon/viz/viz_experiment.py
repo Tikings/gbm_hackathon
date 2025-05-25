@@ -525,3 +525,13 @@ def see_emb(batch_all=None, gbmnet=None, reducer='tsne', patient_embs=None):
         figs.append(visualize_embeddings(sep_mod_embs, reducer, modality_info=mod_info, return_fig=True))
         figs.append(visualize_embeddings(sep_mod_embs, reducer, modality_info=patient_info, return_fig=True))
     return figs
+
+def visualize_inference(batch, mme, clm, visualizers=['umap', 'tsne', 'mds', 'pca']):
+    patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
+    mme.eval()
+    contrastive_outputs = mme(X_dict)
+    clm.eval()
+    _, true_patient_embeddings = clm(contrastive_outputs, avail_mods)
+    for mode in visualizers:
+        figs = see_emb(reducer=mode, patient_embs=true_patient_embeddings)
+        plt.show()
