@@ -11,7 +11,95 @@ from matplotlib.colors import ListedColormap
 import scipy.spatial.distance as distance
 from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
 
+from gbmhackathon.utils.loss_functions import RankMe
 
+def compute_embedding_quality_metrics(
+    embeddings: torch.Tensor,
+    zero_threshold: float = 1e-2,
+    hist: bool = True,
+    hist_bins: int = 100,
+    auto_bin_ratio: float = 0.95,
+    custom_bins: bool = False
+) -> dict:
+    """
+    Compute various quality metrics for a batch of embeddings.
+
+    Args:
+        embeddings (torch.Tensor): Tensor of shape [B, E], where B is batch size and E is embedding dimensionality.
+        zero_threshold (float): Range around zero to consider as "close to zero" for collapse detection.
+        hist_bins (int): Number of bins for the overall histogram of embedding values.
+
+    Returns:
+        A dictionary containing:
+            - avg_distance (float): Average pairwise distance between embedding rows.
+            - min_distance (float): Minimum non-zero pairwise distance.
+            - rankme (torch.Tensor): Effective rank of the batch (scalar tensor).
+            - histogram (torch.Tensor): Histogram counts of embedding values (length hist_bins).
+            - zero_ratio_per_row (torch.Tensor): Tensor of shape [B], ratio of values per row within +/- zero_threshold.
+    """
+    assert embeddings.ndim == 2, "Embeddings must be a 2D tensor of shape [B, E]"
+    B, E = embeddings.shape
+
+    # Pairwise distances (Euclidean)
+    # Compute full distance matrix
+    with torch.no_grad():
+        dist_matrix = torch.cdist(embeddings, embeddings, p=2)  # [B, B]
+        # Mask out zeros on diagonal
+        mask = ~torch.eye(B, dtype=torch.bool, device=embeddings.device)
+        distances = dist_matrix[mask]
+        avg_distance = distances.mean().item()
+        min_distance = distances.min().item()
+
+    # RankMe
+    rankme_module = RankMe()
+    rankme_value = rankme_module(embeddings).item()
+
+    if hist:
+        # Histogram of values with edges
+        flat_vals = embeddings.view(-1)
+        if custom_bins:
+            # Compute percentiles
+            q_start = float(torch.quantile(flat_vals, 0.0))
+            q_low = float(torch.quantile(flat_vals, 1-auto_bin_ratio))
+            q_mid = float(torch.quantile(flat_vals, auto_bin_ratio))
+            q_high = float(torch.quantile(flat_vals, 1.0))
+            # Number of bins in each segment
+            n_body = int(hist_bins * auto_bin_ratio)
+            n_tail = int(0.5 * (hist_bins - n_body))
+            # Edges for each segment
+            edges_start = torch.linspace(q_start, q_low, n_tail + 1)
+            edges_low = torch.linspace(q_low, q_mid, n_body + 1)
+            edges_high = torch.linspace(q_mid, q_high, n_tail + 1)
+            # Combine, avoiding duplicate q_mid
+            bin_edges = torch.cat([edges_start[:-1], edges_low[:-1], edges_high])
+            hist_counts, hist_bins = torch.histogram(flat_vals, bins=bin_edges)
+        else:
+            hist_counts, hist_bins = torch.histogram(flat_vals)
+        
+    # Ratio of near-zero values per row
+    zero_mask = embeddings.abs() <= zero_threshold
+    zero_counts = zero_mask.sum(dim=1).to(torch.float32)
+    zero_ratio_per_row = zero_counts / E
+    zero_ratio_per_row = zero_ratio_per_row.mean().item()
+
+    if hist:
+        return {
+            'avg_distance': avg_distance,
+            'min_distance': min_distance,
+            'rankme': rankme_value,
+            'hist_counts': hist_counts.detach().numpy(),
+            'hist_bins':hist_bins.detach().numpy(),
+            'hist_values':flat_vals.detach().numpy(),
+            'zero_ratio_per_row': zero_ratio_per_row
+        }
+    else:
+        return {
+            'avg_distance': avg_distance,
+            'min_distance': min_distance,
+            'rankme': rankme_value,
+            'zero_ratio_per_row': zero_ratio_per_row
+        }
+    
 class EmbeddingAnalyzer:
     """
     Classe pour analyser les embeddings issus d'un apprentissage par contrastive learning

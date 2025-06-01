@@ -383,11 +383,154 @@ class RegularizedInfoNCELoss(nn.Module):
             # torch.clamp(combined_penalties, max=100)
             reg_loss = combined_penalties.sum()
             if self.smoothing_func is not None:
-                return self.smoothing_func(nce_loss - self.alpha * reg_loss)
+                return self.smoothing_func(nce_loss + self.alpha * reg_loss)
             else:
-                return nce_loss - self.alpha * reg_loss
+                return nce_loss + self.alpha * reg_loss
         if self.smoothing_func is not None:
             return self.smoothing_func(nce_loss)
         else:
             return nce_loss
-            
+
+def soft_orthogonality_loss(W: torch.Tensor) -> torch.Tensor:
+    """
+    Soft orthogonality: penalize deviation of W^T W from identity.
+    W: (in_features, out_features) or (out_features, in_features)
+    """
+    # Compute Gram matrix
+    WT_W = W.T @ W
+    I = torch.eye(WT_W.size(0), device=W.device, dtype=W.dtype)
+    return ((WT_W - I) ** 2).sum()
+
+
+def spectral_norm(W: torch.Tensor, num_iters: int = 1) -> torch.Tensor:
+    """
+    Approximate spectral norm via power iteration.
+    """
+    # Flatten to 2D
+    W_mat = W.view(W.size(0), -1)
+    u = torch.randn(W_mat.size(0), 1, device=W.device)
+    for _ in range(num_iters):
+        v = torch.nn.functional.normalize(W_mat.T @ u, dim=0)
+        u = torch.nn.functional.normalize(W_mat @ v, dim=0)
+    sigma = (u.T @ W_mat @ v).squeeze()
+    return sigma
+
+
+def srip_loss(W: torch.Tensor, num_iters: int = 1) -> torch.Tensor:
+    """
+    SRIP loss: spectral norm of weight matrix.
+    """
+    return spectral_norm(W, num_iters=num_iters)
+
+
+class RegularizationModule(nn.Module):
+    """
+    Configurable regularization module combining VICReg components and orthogonality terms.
+
+    Args:
+        use_invariance: whether to apply invariance loss (requires z1, z2)
+        inv_coeff: coefficient for invariance term
+        use_variance: whether to apply variance regularization
+        var_coeff: coefficient for variance term
+        use_covariance: whether to apply covariance regularization
+        cov_coeff: coefficient for covariance term
+        var_gamma: target minimum std in variance
+        use_soft_orth: whether to apply soft orthogonality on weight matrices
+        so_coeff: coefficient for soft orth term
+        use_srip: whether to apply SRIP on weight matrices
+        srip_coeff: coefficient for srip term
+        srip_iters: power iteration steps for srip
+    """
+    def __init__(
+        self,
+        reg_coeff: float = 0.1,
+        use_invariance: bool = False,
+        inv_coeff: float = 25.0,
+        use_variance: bool = True,
+        var_coeff: float = 25.0,
+        use_covariance: bool = True,
+        cov_coeff: float = 1.0,
+        var_gamma: float = 1.0,
+        var_eps: float = 1e-4,
+        use_soft_orth: bool = False,
+        so_coeff: float = 1.0,
+        use_srip: bool = False,
+        srip_coeff: float = 1.0,
+        srip_iters: int = 1
+    ):
+        super().__init__()
+        self.reg_coeff = reg_coeff
+        # VICReg components
+        self.use_invariance = use_invariance
+        self.inv_coeff = inv_coeff
+        self.use_variance = use_variance
+        self.var_coeff = var_coeff
+        self.use_covariance = use_covariance
+        self.cov_coeff = cov_coeff
+        self.var_gamma = var_gamma
+        self.var_eps = var_eps
+
+        # OR components
+        self.use_soft_orth = use_soft_orth
+        self.so_coeff = so_coeff
+        self.use_srip = use_srip
+        self.srip_coeff = srip_coeff
+        self.srip_iters = srip_iters
+
+        # Losses
+        self.mse = nn.MSELoss()
+
+    def _invariance_loss(self, z1: torch.Tensor, z2: torch.Tensor) -> torch.Tensor:
+        return self.mse(z1, z2)
+
+    def _variance_loss(self, z: torch.Tensor) -> torch.Tensor:
+        std = torch.sqrt(z.var(dim=0) + self.var_eps)
+        # penalize dimensions with std < gamma
+        return torch.mean(torch.relu(self.var_gamma - std))
+
+    def _covariance_loss(self, z: torch.Tensor) -> torch.Tensor:
+        B, E = z.size()
+        z_centered = z - z.mean(dim=0)
+        cov = (z_centered.T @ z_centered) / (B - 1)
+        off_diag = cov - torch.diag(torch.diag(cov))
+        return (off_diag ** 2).sum() / E
+
+    def forward(
+        self,
+        z1: torch.Tensor,
+        z2: torch.Tensor = None,
+        weights: list[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Compute regularization loss.
+
+        Args:
+            z1: embedding batch (B x E)
+            z2: second view (if invariance used)
+            weights: list of weight matrices for orthogonality
+
+        Returns:
+            total regularization loss
+        """
+        loss = 0.0
+        # VICReg losses
+        if self.use_invariance and z2 is not None:
+            loss = loss + self.inv_coeff * self._invariance_loss(z1, z2)
+        if self.use_variance:
+            loss = loss + self.var_coeff * (
+                self._variance_loss(z1) + (self._variance_loss(z2) if z2 is not None else 0)
+            )
+        if self.use_covariance:
+            loss = loss + self.cov_coeff * (
+                self._covariance_loss(z1) + (self._covariance_loss(z2) if z2 is not None else 0)
+            )
+
+        # Orthogonality losses
+        if weights is not None:
+            for W in weights:
+                if self.use_soft_orth:
+                    loss = loss + self.so_coeff * soft_orthogonality_loss(W)
+                if self.use_srip:
+                    loss = loss + self.srip_coeff * srip_loss(W, num_iters=self.srip_iters)
+
+        return self.reg_coeff * loss

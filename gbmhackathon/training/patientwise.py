@@ -214,10 +214,6 @@ def collate_patient_wise(batch):
     list_dict_tensor = [patient[1] for patient in batch]
     modalities = list(list_dict_tensor[0].keys())
 
-    # Removing connectivites of spatial embeddings from modalities
-    if "connectivities" in modalities :
-        modalities.remove("connectivities")
-    
     #print(f" Modalities available : {modalities}")
     
     # The order of the rows are the same as those of the dictionnary with the embeddings
@@ -228,31 +224,70 @@ def collate_patient_wise(batch):
     
     dict_batched = {}
     for mod in modalities:
-        if mod != "spatial" : 
-            mod_list = []
-            for dic in list_dict_tensor:
-                # Ensure tensor is on the correct device
-                tensor = dic[mod]
-                if tensor.device != device:
-                    tensor = tensor.to(device)
-                mod_list.append(tensor)
-            if len(mod_list[0].size()) == 2 and mod_list[0].size(0) > 1:
-                aggregate_tiles = []
-                for tensor in mod_list:
-                    # print(tensor.size())
-                    aggregate_tiles.append(tensor.mean(dim=0).squeeze())
-                    # print(tensor.mean(dim=0).squeeze().size())
-                dict_batched[mod] = torch.stack(aggregate_tiles).type(torch.float32)
-            else:
-                dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
-        else :
-            spatial_stack = [dic["spatial"] for _ in dic.keys()] #! Check the dimension
-            connectivities_stack = [dic["connectivities"] for _ in dic.keys()]
-            dict_batched["spatial"] = batcher_graphs(spatial_stack, connectivities_stack)
+        mod_list = []
+        for dic in list_dict_tensor:
+            # Ensure tensor is on the correct device
+            tensor = dic[mod]
+            if tensor.device != device:
+                tensor = tensor.to(device)
+            mod_list.append(tensor)
+        if len(mod_list[0].size()) == 2 and mod_list[0].size(0) > 1:
+            aggregate_tiles = []
+            for tensor in mod_list:
+                # print(tensor.size())
+                aggregate_tiles.append(tensor.mean(dim=0).squeeze())
+                # print(tensor.mean(dim=0).squeeze().size())
+            dict_batched[mod] = torch.stack(aggregate_tiles).type(torch.float32)
+        else:
+            dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
 
     available_mod_tensor = torch.stack(list_available).type(torch.float32)
     return list_patient, modalities, dict_batched, available_mod_tensor
 
+## SPATIAL GRAPHENCODER
+# def collate_patient_wise(batch): 
+#     list_patient = [patient[0] for patient in batch]
+#     list_dict_tensor = [patient[1] for patient in batch]
+#     modalities = list(list_dict_tensor[0].keys())
+
+#     # Removing connectivites of spatial embeddings from modalities
+#     if "connectivities" in modalities :
+#         modalities.remove("connectivities")
+    
+#     #print(f" Modalities available : {modalities}")
+    
+#     # The order of the rows are the same as those of the dictionnary with the embeddings
+#     list_available = [patient[2] for patient in batch]
+
+#     # We presuppose that the device is the same for every embedding
+#     device = [patient[-1] for patient in batch][0]
+    
+#     dict_batched = {}
+#     for mod in modalities:
+#         if mod != "spatial" : 
+#             mod_list = []
+#             for dic in list_dict_tensor:
+#                 # Ensure tensor is on the correct device
+#                 tensor = dic[mod]
+#                 if tensor.device != device:
+#                     tensor = tensor.to(device)
+#                 mod_list.append(tensor)
+#             if len(mod_list[0].size()) == 2 and mod_list[0].size(0) > 1:
+#                 aggregate_tiles = []
+#                 for tensor in mod_list:
+#                     # print(tensor.size())
+#                     aggregate_tiles.append(tensor.mean(dim=0).squeeze())
+#                     # print(tensor.mean(dim=0).squeeze().size())
+#                 dict_batched[mod] = torch.stack(aggregate_tiles).type(torch.float32)
+#             else:
+#                 dict_batched[mod] = torch.stack(mod_list).type(torch.float32)
+#         else :
+#             spatial_stack = [dic["spatial"] for _ in dic.keys()] #! Check the dimension
+#             connectivities_stack = [dic["connectivities"] for _ in dic.keys()]
+#             dict_batched["spatial"] = batcher_graphs(spatial_stack, connectivities_stack)
+
+#     available_mod_tensor = torch.stack(list_available).type(torch.float32)
+#     return list_patient, modalities, dict_batched, available_mod_tensor
 def collate_patient_wise_colearning(batch): 
     list_patient = [patient[0] for patient in batch]
     list_dict_tensor = [patient[1] for patient in batch]

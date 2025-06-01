@@ -97,16 +97,16 @@ def visualize_embeddings(
         if title is None:
             title = f'PCA of {n_samples} samples'
     elif method_l == 'tsne':
-        reducer = TSNE(n_components=2, perplexity=min(30, n_samples-1), random_state=42)
+        reducer = TSNE(n_components=2, perplexity=min(30, n_samples-1), random_state=6262)
         if title is None:
             title = f't-SNE of {n_samples} samples'
     elif method_l == 'mds':
-        reducer = MDS(n_components=2, random_state=42)
+        reducer = MDS(n_components=2, random_state=6262)
         if title is None:
             title = f'MDS of {n_samples} samples'
     elif method_l == 'umap':
         reducer = umap.UMAP(n_components=2, min_dist=0.1 if n_samples>100 else 0.5,
-                            n_neighbors=min(15, n_samples-1), random_state=42)
+                            n_neighbors=min(15, n_samples-1), random_state=6262)
         if title is None:
             title = f'UMAP of {n_samples} samples'
     else:
@@ -132,7 +132,7 @@ def visualize_embeddings(
             best_silhouette = -1
             param_grid = cluster_params if cluster_params else {'n_clusters': range(2, min(10, n_samples // 2) + 1)}
             for params in ParameterGrid(param_grid):
-                kmeans = KMeans(random_state=42, n_init='auto', **params)
+                kmeans = KMeans(random_state=6262, n_init='auto', **params)
                 labels_temp = kmeans.fit_predict(emb2d)
                 if len(np.unique(labels_temp)) > 1:
                     silhouette_avg = silhouette_score(emb2d, labels_temp)
@@ -141,7 +141,7 @@ def visualize_embeddings(
                         best_n_clusters = params['n_clusters']
             print(f"Best Silouhette Score :{best_silhouette}")
             if best_n_clusters > 1:
-                kmeans_final = KMeans(n_clusters=best_n_clusters, random_state=42, n_init='auto')
+                kmeans_final = KMeans(n_clusters=best_n_clusters, random_state=6262, n_init='auto')
                 cluster_labels = kmeans_final.fit_predict(emb2d)
                 if title is None:
                     title = f'Clustered {method.upper()} embeddings (KMeans, k={best_n_clusters})'
@@ -355,16 +355,16 @@ def visualize_embeddings(
 #         if title is None:
 #             title = f'PCA of {n_samples} samples'
 #     elif method_l == 'tsne':
-#         reducer = TSNE(n_components=2, perplexity=min(30, n_samples-1), random_state=42)
+#         reducer = TSNE(n_components=2, perplexity=min(30, n_samples-1), random_state=6262)
 #         if title is None:
 #             title = f't-SNE of {n_samples} samples'
 #     elif method_l == 'mds':
-#         reducer = MDS(n_components=2, random_state=42)
+#         reducer = MDS(n_components=2, random_state=6262)
 #         if title is None:
 #             title = f'MDS of {n_samples} samples'
 #     elif method_l == 'umap':
 #         reducer = UMAP(n_components=2, min_dist=0.1 if n_samples>100 else 0.5,
-#                        n_neighbors=min(15, n_samples-1), random_state=42)
+#                        n_neighbors=min(15, n_samples-1), random_state=6262)
 #         if title is None:
 #             title = f'UMAP of {n_samples} samples'
 #     else:
@@ -526,12 +526,18 @@ def see_emb(batch_all=None, gbmnet=None, reducer='tsne', patient_embs=None):
         figs.append(visualize_embeddings(sep_mod_embs, reducer, modality_info=patient_info, return_fig=True))
     return figs
 
-def visualize_inference(batch, mme, clm, visualizers=['umap', 'tsne', 'mds', 'pca']):
+def new_framework_inference(batch, mme, clm=None):
     patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
     mme.eval()
-    contrastive_outputs = mme(X_dict)
-    clm.eval()
-    _, true_patient_embeddings = clm(contrastive_outputs, avail_mods)
+    mme_embeddings = mme(X_dict)
+    if clm is not None:
+        clm.eval()
+        mme_embeddings, true_patient_embeddings = clm(mme_embeddings, avail_mods)
+    else:
+        true_patient_embeddings = None
+    return mme_embeddings, true_patient_embeddings
+    
+def visualize_inference(inference_emb, visualizers=['umap', 'tsne', 'mds', 'pca']):
     for mode in visualizers:
-        figs = see_emb(reducer=mode, patient_embs=true_patient_embeddings)
+        figs = see_emb(reducer=mode, patient_embs=inference_emb)
         plt.show()

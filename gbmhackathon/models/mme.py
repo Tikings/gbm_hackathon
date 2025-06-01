@@ -12,7 +12,21 @@ from torch.nn.parallel import parallel_apply
 
 from gbmhackathon.utils.module_functions import instantiate, enforce_signature_types
 
-# Helper functions
+# HELPER FUNCTIONS
+
+def concat_modality_embeddings(x: Dict) -> torch.tensor:
+    """
+    Reads a dictionary of type  key = modality, value = tensor and builds the 
+    concatenated representations for each sample.
+    """
+    concatenated_tensors = []
+    for idx in range(x[list(x.keys())[0]].size(0)):
+        patient_representation = []
+        for modality in x.keys():
+            patient_representation.append(x[modality][idx].view(-1))
+        concatenated_tensors.append(torch.cat(patient_representation, dim=0).unsqueeze(0))
+    return  torch.cat(concatenated_tensors, dim=0)
+    
 def remove_field(cfg: Dict, flag: Union[str,List[str]]) -> Dict:
     match flag:
         case str():
@@ -153,7 +167,10 @@ class MLP(nn.Module):
                 # Adding Activation Function
                 if isinstance(act_fn, list):
                     if act_fn[i - 1] is not None:
-                        module_list.append(act_fn[i - 1]())
+                        try:
+                            module_list.append(act_fn[i - 1]())
+                        except: # If the act_fn is an instantiated module
+                            module_list.append(act_fn[i - 1])
                 else:
                     if act_fn is not None:
                         module_list.append(act_fn())
@@ -751,7 +768,7 @@ class MultiModalEncoder(nn.Module):
         for modality in self.modality_net_map.keys():
             outputs[modality] = self.modality_net_map[modality](x[modality])
         return outputs
-
+    
 class RefinementBlock(nn.Module):
     @enforce_signature_types
     def __init__(self, emb_size: int,
@@ -820,13 +837,7 @@ class RefinementBlock(nn.Module):
 
     def forward(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
         # Create patient representations across modalities by concatenation
-        concatenated_tensors = []
-        for idx in range(x[list(x.keys())[0]].size(0)):
-            patient_representation = []
-            for modality in x.keys():
-                patient_representation.append(x[modality][idx].view(-1))
-            concatenated_tensors.append(torch.cat(patient_representation, dim=0).unsqueeze(0))
-        patient_embeddings = torch.cat(concatenated_tensors, dim=0)
+        patient_embeddings = concat_modality_embeddings(x)
         # print("patient_embs", patient_embeddings.size())
         # Incorporate cross-modality self attention
         cross_modality_enriched, _ = self.cross_modality_enricher(query=patient_embeddings.unsqueeze(1),
