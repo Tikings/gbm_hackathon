@@ -22,6 +22,9 @@ class PatientLearningDataset(Dataset):
                  root_s3 : Path = ABSTRA_PROJECT_STORAGE_BUCKET, 
                  device: Optional[Union[str, torch.device]] = None,
                  dropout: float = 0.0,
+                 normalize: bool = False,
+                 MIN: float = -1.0,
+                 MAX: float = 1.0,
                  ):
         self.root = root_s3
         self.name_emb = name_emb
@@ -29,7 +32,10 @@ class PatientLearningDataset(Dataset):
         assert isinstance(dropout, float), f"Dropout must be a float, current type is {type(dropout)}"
         assert dropout <= 1 and dropout >= 0, "Dropout parameter must be between 0 and 1 (both included)"
         self.dropout = dropout
-
+        self.normalize = normalize
+        self.min = MIN
+        self.max = MAX
+        
         # Handle device selection - use CUDA if available, otherwise CPU
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -56,7 +62,10 @@ class PatientLearningDataset(Dataset):
         self.dict_emb = dict([(key), self.format_dict_keys(self.dict_emb[key],
                                                           PATTERN_PATIENT)]
                              for key in self.dict_emb.keys())
-
+        if self.normalize:
+            self.normalize_data()
+            print("Normalization applied successfully")
+                
         self.size_emb = {}
         for key in self.dict_emb.keys():
             shape = list(self.dict_emb[key].values())[0].shape
@@ -96,6 +105,28 @@ class PatientLearningDataset(Dataset):
                 new_dict[new_key] = value
         return new_dict
 
+    def normalize_data(self):
+        # Apply min max normalization towards [MIN,MAX]
+        for modality in self.dict_emb.keys():
+            # print("Size before Normalization", list(self.dict_emb[modality].values())[0].size())
+            if modality != 'spatial':
+                all_mod_embs = [tensor.unsqueeze(0) for tensor in list(self.dict_emb[modality].values())]
+                all_mod_embs = torch.cat(all_mod_embs, dim=0)
+                m, M = all_mod_embs.min(), all_mod_embs.max()
+                norm_embs = (all_mod_embs - m) / (M - m)
+                norm_embs = norm_embs * (self.max - self.min) + self.min
+                mapping = zip(list(self.dict_emb[modality].keys()), list(range(len(list(self.dict_emb[modality].keys())))))
+                self.dict_emb[modality] = {pid:norm_embs[idx,:].squeeze() for pid, idx in mapping}
+            else:
+                min_list = torch.tensor([tensor.min().item() for tensor in list(self.dict_emb[modality].values())])
+                max_list = torch.tensor([tensor.max().item() for tensor in list(self.dict_emb[modality].values())])
+                m, M = torch.min(min_list), torch.max(max_list)
+                for pid in self.dict_emb[modality].keys():
+                    norm_emb = (self.dict_emb[modality][pid] - m) / (M - m)
+                    norm_emb = norm_emb * (self.max - self.min) + self.min
+                    self.dict_emb[modality][pid] = norm_emb
+            # print("Size after Normalization", list(self.dict_emb[modality].values())[0].size())
+            
     def store_all(self):
         for idx in self.ind2patient.keys():
             dict_patient = {}
