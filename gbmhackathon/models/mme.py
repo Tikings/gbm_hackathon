@@ -768,6 +768,11 @@ class MultiModalEncoder(nn.Module):
         for modality in self.modality_net_map.keys():
             outputs[modality] = self.modality_net_map[modality](x[modality])
         return outputs
+
+    def inference(self, x: Dict[str, torch.Tensor]):
+        outputs = self.forward(x)
+        return concat_modality_embeddings(outputs)
+        
     
 class RefinementBlock(nn.Module):
     @enforce_signature_types
@@ -869,7 +874,61 @@ class RefinementBlock(nn.Module):
         final_representations = torch.add(final_representations, cross_modality_enriched)
         # print("final_repr", final_representations.size())
         return final_representations
+    
+    def detailed_inference(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
+        out_dict = {'input':None,
+                    'input_avail_mod':None,
+                    'cross_mod':None,
+                    'cross_mod_attn_w':None,
+                    'avail_mod':None, 
+                    'avail_mod_attn_w':None, 
+                    'final_emb':None, 
+                    'final_emb_attn_w':None}
+        # Create patient representations across modalities by concatenation
+        patient_embeddings = concat_modality_embeddings(x)
+        out_dict['input'] = patient_embeddings
+        
+        # print("patient_embs", patient_embeddings.size())
+        # Incorporate cross-modality self attention
+        cross_modality_enriched, attn_w = self.cross_modality_enricher(query=patient_embeddings.unsqueeze(1),
+                                                              key=patient_embeddings.unsqueeze(1),
+                                                              value=patient_embeddings.unsqueeze(1))
+        out_dict['cross_mod_attn_w'] = attn_w
+        
+        cross_modality_enriched = self.cross_modality_enricher_proj(cross_modality_enriched.squeeze())
+        # Add residual connection
+        cross_modality_enriched = torch.add(cross_modality_enriched, patient_embeddings)
+        out_dict['cross_mod'] = cross_modality_enriched
+        
+        # print("cross_mod_enriched", cross_modality_enriched.size())
 
+        out_dict['input_avail_mod'] = avail_mods
+        # Represent available modality statuses
+        avail_mods_embeddings_linear = self.available_modality_linear_encoder(avail_mods)
+        # print("avail_mods_linear", avail_mods_embeddings_linear.size())
+        avail_mods_embeddings, attn_w = self.available_modality_attn_encoder(query=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                    key=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                    value=avail_mods_embeddings_linear.unsqueeze(1))
+        out_dict['avail_mod_attn_w'] = attn_w
+        avail_mods_embeddings = self.available_modality_attn_encoder_proj(avail_mods_embeddings.squeeze())
+        
+        # Add residual connection
+        avail_mods_embeddings = torch.add(avail_mods_embeddings, avail_mods_embeddings_linear)
+        out_dict['avail_mod'] = avail_mods_embeddings
+        # print("avail_mods_emb", avail_mods_embeddings.size())
+
+        # Incorporate available modality status
+        final_representations, attn_w = self.available_modality_enricher(query=cross_modality_enriched.unsqueeze(1), 
+                                                                 key=avail_mods_embeddings.unsqueeze(1), 
+                                                                 value=cross_modality_enriched.unsqueeze(1))
+        out_dict['final_emb_attn_w'] = attn_w
+        final_representations = self.final_projection(final_representations.squeeze())
+        # Add residual connection
+        final_representations = torch.add(final_representations, cross_modality_enriched)
+        # print("final_repr", final_representations.size())
+        out_dict['final_emb'] = attn_w
+        return out_dict
+        
 class PredictiveModule(nn.Module):
     @enforce_signature_types
     def __init__(self,
