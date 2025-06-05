@@ -958,13 +958,19 @@ class ClinicalLinkageModule(nn.Module):
         super().__init__()
         self.config = {'refinement_cfg': refinement_cfg,
                        'predictive_cfg': predictive_cfg}
-        
-        self.refinement_block = instantiate(refinement_cfg, RefinementBlock)
+        if refinement_cfg is not None:
+            self.refinement_block = instantiate(refinement_cfg, RefinementBlock)
+        else:
+            self.refinement_block = None
         self.predictive_module = instantiate(predictive_cfg, PredictiveModule)
         assert self.refinement_block.device == self.predictive_module.device, f"Refinement block (on {self.refinement_block.device}) and predictive module (on {self.predictive_module.device}) must have the same device."
         self.device = self.refinement_block.device
-    def forward(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
-        patient_embeddings = self.refinement_block(x, avail_mods)
+    def forward(self, x: Dict[str, torch.Tensor], avail_mods: Union[torch.Tensor, None] = None):
+        if self.refinement_block is not None:
+            assert avail_mods is not None, "When using the refinement block, you must provide avail_mods"
+            patient_embeddings = self.refinement_block(x, avail_mods)
+        else:
+            patient_embeddings = concat_modality_embeddings(x)
 
         task_outputs = self.predictive_module(patient_embeddings)
         return task_outputs, patient_embeddings

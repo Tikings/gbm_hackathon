@@ -53,7 +53,7 @@ def modality_wise_contrastive_learning(mme,
         
     if make_gifs:
         # Save embedding plots
-        emb_frame_dirs = ['emb_mme', 'emb_by_mod', 'emb_by_patient']
+        emb_frame_dirs = ['mw_emb_mme', 'mw_emb_by_mod', 'mw_emb_by_patient']
                     
         for d in emb_frame_dirs:
             os.makedirs(d, exist_ok=True)
@@ -81,7 +81,6 @@ def modality_wise_contrastive_learning(mme,
     
             # Loss computation 
             for modality in contrastive_outputs.keys():
-                optimizer_dict[modality].zero_grad()
                 contrastive_loss_batch = ({modality:contrastive_outputs[modality]}, patient_ids, avail_mods)
                 modality_loss = contrastive_loss_dict[modality](contrastive_loss_batch)
                 if regularizer_dict:
@@ -208,10 +207,196 @@ def modality_wise_contrastive_learning(mme,
             plt.title(f"Evolution of {metric} over epochs")
             plt.show()
     if make_gifs:
-        make_matplotlib_gif('emb_mme', 'emb_mme_animation.gif', fps=4, max_frames=epochs)
-        make_matplotlib_gif('emb_by_mod', 'emb_by_modality_animation.gif', fps=4, max_frames=epochs)
-        make_matplotlib_gif('emb_by_patient', 'emb_by_patient_animation.gif', fps=4, max_frames=epochs)
+        make_matplotlib_gif('mw_emb_mme', 'mw_emb_mme_animation.gif', fps=4, max_frames=epochs)
+        make_matplotlib_gif('mw_emb_by_mod', 'mw_emb_by_modality_animation.gif', fps=4, max_frames=epochs)
+        make_matplotlib_gif('mw_emb_by_patient', 'mw_emb_by_patient_animation.gif', fps=4, max_frames=epochs)
 
+def patient_wise_contrastive_learning(mme, 
+                          dataloader,
+                          epochs, 
+                          base_lr, 
+                          optimizer, # One optimizer instance per modality
+                          contrastive_loss, # One loss instance per modality
+                          scheduler, # One scheduler instance per modality
+                          regularizer=None, #One regularizer method per modality
+                          batch_all=None,
+                          make_gifs=False,
+                          analyze_emb=False,
+                          device=None,
+                          ):
+    device = device if device is not None else mme.device
+    # Initialize metric collectors
+    embedding_metrics = []
+    
+    
+    # Phase I training loop
+    EPOCHS_I_LOSSES = []
+    modalities = next(iter(dataloader))[2].keys()
+    
+    # Logging of modality losses at each batch
+    batch_loss = []
+    
+    # Logging of modality losses per epoch
+    avg_loss = []
+
+    if make_gifs and batch_all is None:
+        print("No batch_all specified, setting make_gifs to False.")
+        make_gifs = False
+        
+    if make_gifs:
+        # Save embedding plots
+        emb_frame_dirs = ['pw_emb_mme', 'pw_emb_by_mod', 'pw_emb_by_patient']
+                    
+        for d in emb_frame_dirs:
+            os.makedirs(d, exist_ok=True)
+
+    if analyze_emb:
+        quality_histograms = []
+        quality_dict = {
+        'avg_distance': [],
+        'min_distance': [],
+        'rankme': [],
+        'zero_ratio_per_row': []
+    }
+        
+    for epoch in range(1, epochs+1):
+        epoch_loss = []
+        
+        for idx, batch in enumerate(dataloader):
+            # Get batch
+            patient_ids, modalities, X_dict, avail_mods, batch_targets, targets_names = batch
+            # print(batch_targets.size())
+            # Forward pass
+            contrastive_outputs = mme(X_dict)
+            # print(predictive_outputs.size())
+            contrastive_loss_batch = (contrastive_outputs, patient_ids, avail_mods)
+            
+            # Loss computation 
+            contrastive_loss = contrastive_loss(contrastive_loss_batch)
+            regularizer_terms = torch.tensor(0.0, device=device)
+            if regularizer:
+                for modality in contrastive_outputs.keys():
+                    regularization_term = regularizer(contrastive_outputs[modality])
+                    regularizer_terms = torch.add(regularization_term, regularizer_terms)
+            contrastive_loss = torch.add(contrastive_loss, regularizer_terms.mean())
+            contrastive_loss.backward()
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+            batch_loss.append(contrastive_loss.item())
+    
+        avg_loss.append(np.mean(batch_loss))
+    
+        print(f"Epoch {epoch} average total loss across modalities: {np.mean(batch_loss):.4f}".upper())
+    
+        EPOCHS_I_LOSSES.append(np.mean(batch_loss))
+
+        if make_gifs:
+            # capture embeddings figures instead of immediate plotting
+            figs = see_emb(batch_all, mme, reducer='tsne')
+            for i, fig in enumerate(figs):
+                path = os.path.join(emb_frame_dirs[i], f'epoch_{epoch:03d}.png')
+                fig.savefig(path, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+        if analyze_emb:
+            mme_embeddings = concat_modality_embeddings(new_framework_inference(batch_all, mme)[0])
+
+            if epoch == 1 or epoch == epochs:
+                hist = True
+            else:
+                hist = False
+            quality_dict_epoch = compute_embedding_quality_metrics(mme_embeddings,
+                                              zero_threshold = 1e-3,
+                                              hist=hist,
+                                              hist_bins = 100)
+            if epoch == 1 or epoch == epochs:
+                quality_histograms.append([quality_dict_epoch['hist_counts'], 
+                                           quality_dict_epoch['hist_bins'],
+                                           quality_dict_epoch['hist_values']
+                                          ])
+            for quality_key in quality_dict.keys():
+                quality_dict[quality_key].append(quality_dict_epoch[quality_key])
+            # with torch.no_grad():
+            #     # Analyser les embeddings tous les N epochs
+            #     if epoch % 5 == 0 or epoch == epochs - 1:
+            #         save_dir = f"embedding_analysis/epoch_{epoch}"
+            #         os.makedirs(save_dir, exist_ok=True)
+            #         modality_keys = mme.modality_net_map.keys()
+            #         metrics = analyze_embeddings_after_epoch(
+            #             model=mme,
+            #             dataloader=dataloader,
+            #             modality_keys=modality_keys,
+            #             patient_map=patient_map,
+            #             device=mme.modality_net_map[list(mme.modality_net_map.keys())[0]].device,
+            #             num_batches=-1,  # Analyser 2 batchs
+            #             visualize=True,
+            #             save_dir=save_dir
+            #         )
+                    
+            #         embedding_metrics.append({
+            #             'epoch': epoch,
+            #             'metrics': metrics
+            #         })
+                    
+            #         # Visualiser l'évolution des métriques
+            #         if len(embedding_metrics) > 1:
+            #             visualize_metrics_evolution(embedding_metrics, save_dir=save_dir)
+    # Prepare data
+    epochs_range = list(range(1, len(EPOCHS_I_LOSSES) + 1))
+    global_avg = EPOCHS_I_LOSSES
+    
+    # Plot style
+    plt.style.use('seaborn-v0_8-whitegrid')  # clean, modern grid
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot global cross-modality average
+    ax.plot(epochs_range, global_avg,
+            marker='s', linewidth=3, linestyle='--',
+            color='black', label='Global Avg Loss')
+    
+    # Aesthetic tweaks
+    ax.set_title('Epoch-wise Contrastive Loss', fontsize=16, weight='bold')
+    ax.set_xlabel('Epoch', fontsize=14)
+    ax.set_ylabel('Average Loss', fontsize=14)
+    ax.set_xticks(epochs_range)
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    ax.legend(title='Legend', fontsize=12, title_fontsize=13, loc='upper right', frameon=True)
+    ax.grid(True, which='major', linestyle='-', alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    if analyze_emb:
+        # Histogram values
+        counts = quality_histograms[0][0]
+        bins = quality_histograms[0][1]
+        values = quality_histograms[0][2]
+        plt.bar(bins[:-1], counts, width=np.diff(bins))
+        M, m = bins[-1], bins[0]
+        p = 95
+        median, p_val = np.median(values), np.percentile(values, p)
+        plt.title(f"Histogram of embedding values: Epoch 1\nMax: {M:.4f}, Min: {m:.4f}, Median: {median:.4f}, {p}th: {p_val:.4f} \nAvg near zero ratio = {quality_dict['zero_ratio_per_row'][0]:.4f}, RankMe = {quality_dict['rankme'][0]:.4f}")
+        plt.show()
+        
+        counts = quality_histograms[1][0]
+        bins = quality_histograms[1][1]
+        values = quality_histograms[1][2]
+        plt.bar(bins[:-1], counts, width=np.diff(bins))
+        M, m = bins[-1], bins[0]
+        median, p_val = np.median(values), np.percentile(values, p)
+        plt.title(f"Histogram of embedding values: Epoch {epochs}\nMax: {M:.4f}, Min: {m:.4f}, Median: {median:.4f}, {p}th: {p_val:.4f} \nAvg near zero ratio = {quality_dict['zero_ratio_per_row'][-1]:.4f}, RankMe = {quality_dict['rankme'][-1]:.4f}")
+        plt.show()
+        
+        quality_df = pd.DataFrame(quality_dict)
+        for metric in quality_df.columns:
+            sns.lineplot(quality_df, x=range(epochs), y=metric)
+            plt.title(f"Evolution of {metric} over epochs")
+            plt.show()
+    if make_gifs:
+        make_matplotlib_gif('pw_emb_mme', 'pw_emb_mme_animation.gif', fps=4, max_frames=epochs)
+        make_matplotlib_gif('pw_emb_by_mod', 'pw_emb_by_modality_animation.gif', fps=4, max_frames=epochs)
+        make_matplotlib_gif('pw_emb_by_patient', 'pw_emb_by_patient_animation.gif', fps=4, max_frames=epochs)
+        
 def new_predictive_learning(mme, clm, 
                           t_dataloader,
                           epochs, 
@@ -245,7 +430,7 @@ def new_predictive_learning(mme, clm,
         
     if make_gifs:
         # Save embedding plots
-        emb_frame_dirs = ['emb_clm']
+        emb_frame_dirs = ['pred_emb_clm']
         for d in emb_frame_dirs:
             os.makedirs(d, exist_ok=True)
     if mme is None:
@@ -398,7 +583,7 @@ def new_predictive_learning(mme, clm,
             predictive_plots(v_epoch_losses_dict, v_epochs_losses, mode='val')
     
     if make_gifs:
-        make_matplotlib_gif('emb_clm', 'emb_clm_animation.gif', fps=4, max_frames=epochs)
+        make_matplotlib_gif('pred_emb_clm', 'pred_emb_clm_animation.gif', fps=4, max_frames=epochs)
 
 def predictive_step(epoch, 
                     dataloader, 
