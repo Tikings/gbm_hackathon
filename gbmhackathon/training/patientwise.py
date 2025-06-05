@@ -22,7 +22,7 @@ class PatientLearningDataset(Dataset):
                  root_s3 : Path = ABSTRA_PROJECT_STORAGE_BUCKET, 
                  device: Optional[Union[str, torch.device]] = None,
                  dropout: float = 0.0,
-                 normalize: bool = False,
+                 normalize: bool = True,
                  MIN: float = -1.0,
                  MAX: float = 1.0,
                  ):
