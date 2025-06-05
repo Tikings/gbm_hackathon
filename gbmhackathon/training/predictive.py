@@ -79,7 +79,7 @@ class PredictiveLearningDataset(Dataset):
         self.dict_emb = dict([(key), self.format_dict_keys(self.dict_emb[key],
                                                           PATTERN_PATIENT)]
                              for key in self.dict_emb.keys())
-
+        
         if self.normalize:
             self.normalize_data()
             print("Normalization applied successfully")
@@ -130,7 +130,7 @@ class PredictiveLearningDataset(Dataset):
             # print("Size before Normalization", list(self.dict_emb[modality].values())[0].size())
             if modality != 'spatial':
                 all_mod_embs = [tensor.unsqueeze(0) for tensor in list(self.dict_emb[modality].values())]
-                all_mod_embs = torch.cat(all_mod_embs, dim=0)
+                all_mod_embs = torch.cat(all_mod_embs, dim=0).to(self.device)
                 m, M = all_mod_embs.min(), all_mod_embs.max()
                 norm_embs = (all_mod_embs - m) / (M - m)
                 norm_embs = norm_embs * (self.max - self.min) + self.min
@@ -139,9 +139,9 @@ class PredictiveLearningDataset(Dataset):
             else:
                 min_list = torch.tensor([tensor.min().item() for tensor in list(self.dict_emb[modality].values())])
                 max_list = torch.tensor([tensor.max().item() for tensor in list(self.dict_emb[modality].values())])
-                m, M = torch.min(min_list), torch.max(max_list)
+                m, M = torch.min(min_list).to(self.device), torch.max(max_list).to(self.device)
                 for pid in self.dict_emb[modality].keys():
-                    norm_emb = (self.dict_emb[modality][pid] - m) / (M - m)
+                    norm_emb = (self.dict_emb[modality][pid].to(self.device) - m) / (M - m)
                     norm_emb = norm_emb * (self.max - self.min) + self.min
                     self.dict_emb[modality][pid] = norm_emb
             # print("Size after Normalization", list(self.dict_emb[modality].values())[0].size())
