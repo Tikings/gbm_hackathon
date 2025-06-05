@@ -81,6 +81,7 @@ def modality_wise_contrastive_learning(mme,
     
             # Loss computation 
             for modality in contrastive_outputs.keys():
+                optimizer_dict[modality].zero_grad()
                 contrastive_loss_batch = ({modality:contrastive_outputs[modality]}, patient_ids, avail_mods)
                 modality_loss = contrastive_loss_dict[modality](contrastive_loss_batch)
                 if regularizer_dict:
@@ -89,6 +90,7 @@ def modality_wise_contrastive_learning(mme,
                 modality_loss.backward()
                 optimizer_dict[modality].step()
                 scheduler_dict[modality].step()
+                optimizer_dict[modality].zero_grad()
                 modality_batch_loss[modality].append(modality_loss.item())
     
         for modality in modality_batch_loss.keys():
@@ -458,6 +460,7 @@ def predictive_step(epoch,
             overall_losses.append(overall_loss.item())
             optimizer.step()
             scheduler.step()
+            optimizer.zero_grad()
         else:
             clm.eval()
             with torch.no_grad():

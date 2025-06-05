@@ -56,7 +56,7 @@ def compute_embedding_quality_metrics(
 
     if hist:
         # Histogram of values with edges
-        flat_vals = embeddings.view(-1)
+        flat_vals = embeddings.view(-1).to("cpu")
         if custom_bins:
             # Compute percentiles
             q_start = float(torch.quantile(flat_vals, 0.0))
@@ -524,10 +524,14 @@ def integrate_in_training_loop(EPOCHS_I, dataloader, gbmnet, optimizer_I_fn, bas
                 # Backward pass
                 loss.backward()
                 optimizer_I.step()
+                
         
                 # Learning schedule
                 before_lr_I = optimizer_I.param_groups[0]["lr"]
                 scheduler_I.step()
+
+                # Reset gradients
+                optimizer_I.zero_grad()
         
                 # Store losses
                 epoch_loss.append(loss.item())
