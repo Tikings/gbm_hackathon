@@ -953,7 +953,7 @@ class PredictiveModule(nn.Module):
 class ClinicalLinkageModule(nn.Module):
     @enforce_signature_types
     def __init__(self,
-                refinement_cfg: Dict,
+                refinement_cfg: Union[Dict, None],
                 predictive_cfg: Dict):
         super().__init__()
         self.config = {'refinement_cfg': refinement_cfg,
@@ -963,8 +963,9 @@ class ClinicalLinkageModule(nn.Module):
         else:
             self.refinement_block = None
         self.predictive_module = instantiate(predictive_cfg, PredictiveModule)
-        assert self.refinement_block.device == self.predictive_module.device, f"Refinement block (on {self.refinement_block.device}) and predictive module (on {self.predictive_module.device}) must have the same device."
-        self.device = self.refinement_block.device
+        if refinement_cfg is not None:
+            assert self.refinement_block.device == self.predictive_module.device, f"Refinement block (on {self.refinement_block.device}) and predictive module (on {self.predictive_module.device}) must have the same device."
+        self.device = self.predictive_module.device
     def forward(self, x: Dict[str, torch.Tensor], avail_mods: Union[torch.Tensor, None] = None):
         if self.refinement_block is not None:
             assert avail_mods is not None, "When using the refinement block, you must provide avail_mods"
