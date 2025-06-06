@@ -729,7 +729,7 @@ def build_run_name(model,
                    eta_min_coef,
                    scheduler_class,
                    scheduler_cfg,
-                   contrastive_loss_cfg,
+                   contrastive_loss_cfg=None,
                    modality_list=None,
                    max_len=250):
     """
@@ -748,13 +748,14 @@ def build_run_name(model,
     if "eta_min" in scheduler_cfg:
         # eta_min might be float or dynamic*coef
         parts.append(f"etamin{scheduler_cfg['eta_min']:.0e}")
-    # 4) Contrastive loss core params
-    temp = contrastive_loss_cfg.get("temperature", None)
-    sim  = contrastive_loss_cfg.get("similarity", None)
-    if temp is not None:
-        parts.append(f"t{temp}")
-    if sim:
-        parts.append(sim.replace("-",""))
+    if contrastive_loss_cfg is not None:
+        # 4) Contrastive loss core params
+        temp = contrastive_loss_cfg.get("temperature", None)
+        sim  = contrastive_loss_cfg.get("similarity", None)
+        if temp is not None:
+            parts.append(f"t{temp}")
+        if sim:
+            parts.append(sim.replace("-",""))
     # 5) Modalities (either list or count)
     if modality_list:
         # if many, just count
