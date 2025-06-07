@@ -14,18 +14,21 @@ from gbmhackathon.utils.module_functions import instantiate, enforce_signature_t
 
 # HELPER FUNCTIONS
 
-def concat_modality_embeddings(x: Dict) -> torch.tensor:
+def concat_modality_embeddings(x: Union[Dict, torch.tensor]) -> torch.tensor:
     """
     Reads a dictionary of type  key = modality, value = tensor and builds the 
     concatenated representations for each sample.
     """
-    concatenated_tensors = []
-    for idx in range(x[list(x.keys())[0]].size(0)):
-        patient_representation = []
-        for modality in x.keys():
-            patient_representation.append(x[modality][idx].view(-1))
-        concatenated_tensors.append(torch.cat(patient_representation, dim=0).unsqueeze(0))
-    return  torch.cat(concatenated_tensors, dim=0)
+    if isinstance(x, dict):
+        concatenated_tensors = []
+        for idx in range(x[list(x.keys())[0]].size(0)):
+            patient_representation = []
+            for modality in x.keys():
+                patient_representation.append(x[modality][idx].view(-1))
+            concatenated_tensors.append(torch.cat(patient_representation, dim=0).unsqueeze(0))
+        return  torch.cat(concatenated_tensors, dim=0)
+    else:
+        return x
     
 def remove_field(cfg: Dict, flag: Union[str,List[str]]) -> Dict:
     match flag:
@@ -840,7 +843,7 @@ class RefinementBlock(nn.Module):
                                                 nn.Linear(cross_mods_fc_size, emb_size))
         
 
-    def forward(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
+    def forward(self, x: Dict[str, torch.Tensor], avail_mods: Union[torch.Tensor, None]):
         # Create patient representations across modalities by concatenation
         patient_embeddings = concat_modality_embeddings(x)
         # print("patient_embs", patient_embeddings.size())
@@ -852,28 +855,30 @@ class RefinementBlock(nn.Module):
         # Add residual connection
         cross_modality_enriched = torch.add(cross_modality_enriched, patient_embeddings)
         # print("cross_mod_enriched", cross_modality_enriched.size())
-        
-        # Represent available modality statuses
-        avail_mods_embeddings_linear = self.available_modality_linear_encoder(avail_mods)
-        # print("avail_mods_linear", avail_mods_embeddings_linear.size())
-        avail_mods_embeddings, _ = self.available_modality_attn_encoder(query=avail_mods_embeddings_linear.unsqueeze(1),
-                                                                    key=avail_mods_embeddings_linear.unsqueeze(1),
-                                                                    value=avail_mods_embeddings_linear.unsqueeze(1))
-        avail_mods_embeddings = self.available_modality_attn_encoder_proj(avail_mods_embeddings.squeeze())
-        
-        # Add residual connection
-        avail_mods_embeddings = torch.add(avail_mods_embeddings, avail_mods_embeddings_linear)
-        # print("avail_mods_emb", avail_mods_embeddings.size())
 
-        # Incorporate available modality status
-        final_representations, _ = self.available_modality_enricher(query=cross_modality_enriched.unsqueeze(1), 
-                                                                 key=avail_mods_embeddings.unsqueeze(1), 
-                                                                 value=cross_modality_enriched.unsqueeze(1))
-        final_representations = self.final_projection(final_representations.squeeze())
-        # Add residual connection
-        final_representations = torch.add(final_representations, cross_modality_enriched)
-        # print("final_repr", final_representations.size())
-        return final_representations
+        if avail_mods is not None:
+            # Represent available modality statuses
+            avail_mods_embeddings_linear = self.available_modality_linear_encoder(avail_mods)
+            # print("avail_mods_linear", avail_mods_embeddings_linear.size())
+            avail_mods_embeddings, _ = self.available_modality_attn_encoder(query=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                        key=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                        value=avail_mods_embeddings_linear.unsqueeze(1))
+            avail_mods_embeddings = self.available_modality_attn_encoder_proj(avail_mods_embeddings.squeeze())
+            
+            # Add residual connection
+            avail_mods_embeddings = torch.add(avail_mods_embeddings, avail_mods_embeddings_linear)
+            # print("avail_mods_emb", avail_mods_embeddings.size())
+    
+            # Incorporate available modality status
+            final_representations, _ = self.available_modality_enricher(query=cross_modality_enriched.unsqueeze(1), 
+                                                                     key=avail_mods_embeddings.unsqueeze(1), 
+                                                                     value=cross_modality_enriched.unsqueeze(1))
+            final_representations = self.final_projection(final_representations.squeeze())
+            # Add residual connection
+            final_representations = torch.add(final_representations, cross_modality_enriched)
+            # print("final_repr", final_representations.size())
+            return final_representations
+        return cross_modality_enriched
     
     def detailed_inference(self, x: Dict[str, torch.Tensor], avail_mods: torch.Tensor):
         out_dict = {'input':None,
@@ -901,32 +906,32 @@ class RefinementBlock(nn.Module):
         out_dict['cross_mod'] = cross_modality_enriched
         
         # print("cross_mod_enriched", cross_modality_enriched.size())
-
-        out_dict['input_avail_mod'] = avail_mods
-        # Represent available modality statuses
-        avail_mods_embeddings_linear = self.available_modality_linear_encoder(avail_mods)
-        # print("avail_mods_linear", avail_mods_embeddings_linear.size())
-        avail_mods_embeddings, attn_w = self.available_modality_attn_encoder(query=avail_mods_embeddings_linear.unsqueeze(1),
-                                                                    key=avail_mods_embeddings_linear.unsqueeze(1),
-                                                                    value=avail_mods_embeddings_linear.unsqueeze(1))
-        out_dict['avail_mod_attn_w'] = attn_w
-        avail_mods_embeddings = self.available_modality_attn_encoder_proj(avail_mods_embeddings.squeeze())
-        
-        # Add residual connection
-        avail_mods_embeddings = torch.add(avail_mods_embeddings, avail_mods_embeddings_linear)
-        out_dict['avail_mod'] = avail_mods_embeddings
-        # print("avail_mods_emb", avail_mods_embeddings.size())
-
-        # Incorporate available modality status
-        final_representations, attn_w = self.available_modality_enricher(query=cross_modality_enriched.unsqueeze(1), 
-                                                                 key=avail_mods_embeddings.unsqueeze(1), 
-                                                                 value=cross_modality_enriched.unsqueeze(1))
-        out_dict['final_emb_attn_w'] = attn_w
-        final_representations = self.final_projection(final_representations.squeeze())
-        # Add residual connection
-        final_representations = torch.add(final_representations, cross_modality_enriched)
-        # print("final_repr", final_representations.size())
-        out_dict['final_emb'] = attn_w
+        if avail_mods is not None:
+            out_dict['input_avail_mod'] = avail_mods
+            # Represent available modality statuses
+            avail_mods_embeddings_linear = self.available_modality_linear_encoder(avail_mods)
+            # print("avail_mods_linear", avail_mods_embeddings_linear.size())
+            avail_mods_embeddings, attn_w = self.available_modality_attn_encoder(query=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                        key=avail_mods_embeddings_linear.unsqueeze(1),
+                                                                        value=avail_mods_embeddings_linear.unsqueeze(1))
+            out_dict['avail_mod_attn_w'] = attn_w
+            avail_mods_embeddings = self.available_modality_attn_encoder_proj(avail_mods_embeddings.squeeze())
+            
+            # Add residual connection
+            avail_mods_embeddings = torch.add(avail_mods_embeddings, avail_mods_embeddings_linear)
+            out_dict['avail_mod'] = avail_mods_embeddings
+            # print("avail_mods_emb", avail_mods_embeddings.size())
+    
+            # Incorporate available modality status
+            final_representations, attn_w = self.available_modality_enricher(query=cross_modality_enriched.unsqueeze(1), 
+                                                                     key=avail_mods_embeddings.unsqueeze(1), 
+                                                                     value=cross_modality_enriched.unsqueeze(1))
+            out_dict['final_emb_attn_w'] = attn_w
+            final_representations = self.final_projection(final_representations.squeeze())
+            # Add residual connection
+            final_representations = torch.add(final_representations, cross_modality_enriched)
+            # print("final_repr", final_representations.size())
+            out_dict['final_emb'] = attn_w
         return out_dict
         
 class PredictiveModule(nn.Module):
@@ -966,15 +971,17 @@ class ClinicalLinkageModule(nn.Module):
         if refinement_cfg is not None:
             assert self.refinement_block.device == self.predictive_module.device, f"Refinement block (on {self.refinement_block.device}) and predictive module (on {self.predictive_module.device}) must have the same device."
         self.device = self.predictive_module.device
-    def forward(self, x: Dict[str, torch.Tensor], avail_mods: Union[torch.Tensor, None] = None):
+    def forward(self, x: Dict[str, torch.Tensor], avail_mods: Union[torch.Tensor, None] = None, return_patient_embs: bool = True):
         if self.refinement_block is not None:
-            assert avail_mods is not None, "When using the refinement block, you must provide avail_mods"
+            # assert avail_mods is not None, "When using the refinement block, you must provide avail_mods"
             patient_embeddings = self.refinement_block(x, avail_mods)
         else:
             patient_embeddings = concat_modality_embeddings(x)
 
         task_outputs = self.predictive_module(patient_embeddings)
-        return task_outputs, patient_embeddings
+        if return_patient_embs:
+            return task_outputs, patient_embeddings
+        return task_outputs
         
 class GBMNet(nn.Module):
     """Global model to learn predictive tasks"""

@@ -1,4 +1,4 @@
-import os
+import os, time
 import numpy as np
 import pandas as pd
 import torch
@@ -11,6 +11,12 @@ from plottable.cmap import normed_cmap
 import seaborn as sns
 from scipy.stats import bootstrap
 from pathlib import Path
+
+from sklearn.multioutput import MultiOutputRegressor, MultiOutputClassifier
+from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+from sklearn.model_selection import LeaveOneOut
+from sklearn.metrics import mean_squared_error, f1_score
+from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
 
 def get_mccv_loaders(dataset, 
                      collate_fn,
@@ -34,7 +40,70 @@ def get_mccv_loaders(dataset,
         train_loader = DataLoader(train_subset, batch_size=train_batch_size, collate_fn=collate_fn, shuffle=True, generator=torch.Generator(device=dataset.device))
         val_loader = DataLoader(val_subset, batch_size=val_batch_size, collate_fn=collate_fn, shuffle=False, generator=torch.Generator(device=dataset.device))
         yield train_loader, val_loader
+
+
+def train_GBT(splitter, X, y_reg, y_cat, prefix):
+    # se_sums = np.zeros(2)
+    # f1_rec_sums = np.zeros(1)
+    # f1_mgmt_sums = np.zeros(1)
+
+    all_rmse1 = []
+    all_rmse2 = []
+    all_f1_rec  = []
+    all_f1_mgmt  = []
+    
+    n_splits = splitter.get_n_splits(X)
+    t0 = time.time()
+    for i, (train_idx, test_idx) in enumerate(splitter.split(X), 1):
+        X_train, X_test = X[train_idx].cpu().detach(), X[test_idx].cpu().detach()
+        y_reg_train, y_reg_test = y_reg[train_idx].cpu().detach(), y_reg[test_idx].cpu().detach()
+        y_rec_train, y_rec_test = torch.argmax(y_cat[train_idx,:2], dim=1).cpu().detach(), torch.argmax(y_cat[test_idx,:2], dim=1).cpu().detach()
+        y_mgmt_train, y_mgmt_test = torch.argmax(y_cat[train_idx,2:], dim=1).cpu().detach(), torch.argmax(y_cat[test_idx,2:], dim=1).cpu().detach()
+    
+        reg_mt = MultiOutputRegressor(
+            HistGradientBoostingRegressor(max_iter=100, early_stopping=True),
+            n_jobs=-1)
+        clf_rec = HistGradientBoostingClassifier(max_iter=100, early_stopping=True)
+        clf_mgmt = HistGradientBoostingClassifier(max_iter=100, early_stopping=True)
+    
+        # Training
+        reg_mt.fit(X_train, y_reg_train)
+        clf_rec.fit(X_train, y_rec_train)
+        clf_mgmt.fit(X_train, y_mgmt_train)
+    
+        # Prediction
+        y_reg_pred = reg_mt.predict(X_test)
+        y_rec_pred = clf_rec.predict(X_test)
+        y_mgmt_pred = clf_mgmt.predict(X_test)
+    
+        # Accumulation of metrics
+        for k in range(2):
+            rmse = np.sqrt(np.mean((y_reg_pred[:, k] - y_reg_test[:, k].cpu().numpy())**2))
+            if k == 0:
+                all_rmse1.append(rmse)
+            else:
+                all_rmse2.append(rmse)
+            # se_sums[k] += np.sum((y_reg_pred[:, k] - y_reg_test[:, k].cpu().numpy())**2)
+
+        all_f1_rec.append(f1_score(y_rec_test, y_rec_pred, average='weighted', zero_division=0))
+        all_f1_mgmt.append(f1_score(y_mgmt_test, y_mgmt_pred, average='weighted', zero_division=0))
         
+        # f1_rec_sums += f1_score(y_rec_test, y_rec_pred, average='weighted', zero_division=0)
+        # f1_mgmt_sums += f1_score(y_mgmt_test, y_mgmt_pred, average='weighted', zero_division=0)
+    
+        print(f"Iteration {i}/{n_splits}", end="\r")
+    
+    # # Averages over all Monte Carlo iterations
+    # avg_rmse = np.sqrt(se_sums / (n_splits * len(test_idx)))
+    # avg_f1_rec = f1_rec_sums / n_splits
+    # avg_f1_mgmt = f1_mgmt_sums / n_splits
+    # print("\nMultitâche CV → RMSE:", avg_rmse, "— F1 Recurrency:", avg_f1_rec, "— F1 MGMT Methylation:", avg_f1_mgmt)
+    runtime = time.time() - t0
+    run_name = f"{prefix}_gbt"
+    reg_dict = {'os':all_rmse1, 'pfs':all_rmse2}
+    clf_dict = {'recurrency':all_f1_rec, 'mgmt':all_f1_mgmt}
+    return get_cv_results(reg_dict, clf_dict, run_name, time=runtime, save=True)
+    
 def get_ci(data, n_resamples: int = 10000, confidence: float = 0.95, random_state: int = 6262):
     ci_results = bootstrap((data,), 
               np.mean, 
@@ -104,7 +173,7 @@ def get_cv_results(reg_dict,
 def get_upper(char):
     return char.upper()
     
-def plot_cv_table(result_file, save=False, out_file="results/cv_results_table.pdf"):
+def plot_cv_table(result_file, df=None, save=False, plot=True, out_file="results/cv_results_table.pdf", figsize=(25, 6)):
     """
     Reads `result_file` (cv_results.csv), wraps it in a plottable.Table,
     applies a clean “striped” theme, and displays (or saves) it.
@@ -113,13 +182,14 @@ def plot_cv_table(result_file, save=False, out_file="results/cv_results_table.pd
     - Bold header row, centered text
     - Adjustable column widths based on content
     """
-    # 1) Read CSV into DataFrame
-    df = pd.read_csv(result_file)
+    if df is None:
+        # 1) Read CSV into DataFrame
+        df = pd.read_csv(result_file)
     df['run'] = df['run'].apply(get_upper)
     df['to_rank'] = df[['sum_reg_avg']+[col for col in df.columns if 'up_rmse' in col]].sum(axis=1) + 1/(df[['sum_clf_avg']+[col for col in df.columns if 'low_f1' in col]].sum(axis=1) + 1e-4)
     cols = [col for col in df.columns if 'up_f1' not in col and 'low_rmse' not in col and 'ci' not in col and 'sum' not in col and col not in ['run', 'to_rank']]
 
-    fig, ax = plt.subplots(figsize=(25, 6))
+    fig, ax = plt.subplots(figsize=figsize)
 
     col_defs = ([
         ColumnDefinition(
@@ -151,10 +221,15 @@ def plot_cv_table(result_file, save=False, out_file="results/cv_results_table.pd
     if save:
         save_path = '/'.join(os.path.abspath(__file__).split('/')[:-3]) + '/' + out_file
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    else:
+    if plot:
         plt.show()
 
-def plot_results_cv(result_file, save=False, result_plot_file='results/plot_cv_results.pdf'):
+def plot_results_cv(result_file, 
+                    run_filter: str = None, 
+                    second_plot=False, 
+                    save=False, 
+                    figsize=(10,8),
+                    result_plot_file='results/plot_cv_results.pdf'):
     """
     Reads a CSV file containing cross-validation results and creates two horizontal bar plots:
     1. Horizontal bar chart of avg values with error bars for each run, grouped by task, 
@@ -168,7 +243,8 @@ def plot_results_cv(result_file, save=False, result_plot_file='results/plot_cv_r
 
     # Read the results
     df = pd.read_csv(result_file)
-
+    if run_filter is not None:
+        df = df[df['run'].str.contains(run_filter)]
     # Extract run names
     runs = df['run'].tolist()
     n_runs = len(runs)
@@ -208,7 +284,7 @@ def plot_results_cv(result_file, save=False, result_plot_file='results/plot_cv_r
 
     # Create the first plot: horizontal bars with error bars and annotations
     sns.set(style="whitegrid")
-    fig1, ax1 = plt.subplots(figsize=(10, 8))
+    fig1, ax1 = plt.subplots(figsize=figsize)
     y = np.arange(n_tasks)
     total_height = 0.8
     bar_height = total_height / n_runs
@@ -233,7 +309,7 @@ def plot_results_cv(result_file, save=False, result_plot_file='results/plot_cv_r
     ax1.set_ylabel("Tasks (Metric)")
     ax1.set_xlabel("Average Metric Value")
     ax1.set_title("Cross-Validation Results by Task and Run")
-    ax1.legend(title="Runs", bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax1.legend(title="Runs", bbox_to_anchor=(1.05, 1), loc='upper left', prop={'size':8})
 
     # Annotate each bar with lower and upper values
     for bars, pdata in bar_containers:
@@ -263,59 +339,61 @@ def plot_results_cv(result_file, save=False, result_plot_file='results/plot_cv_r
                 ha="center",
                 va="center"
             )
-    plt.xlim(0, np.max(pdata["up"]) + 0.15)
+    plt.xlim(0, np.max(pdata["up"]) + 0.45)
     plt.tight_layout()
+    plot_cv_table('..', df, save=False, plot=False, figsize=(25, 6))
     if save:
         # Save the second figure (last active) to the specified file path
         suffix = '_metrics'
         save_path = '/'.join(os.path.abspath(__file__).split('/')[:-3]) + '/' + result_plot_file[:-4] + suffix + '.pdf'
         plt.savefig(save_path, bbox_inches='tight', format='pdf')
         
-    # Prepare data for the second plot
-    sum_reg_avgs = df['sum_reg_avg'].tolist()
-    sum_clf_avgs = df['sum_clf_avg'].tolist()
-    sum_reg_dims = df['sum_reg_ci_relative_width'].tolist()
-    sum_clf_dims = df['sum_clf_ci_relative_width'].tolist()
-
-    # Create the second plot: horizontal grouped bars for sum values, annotated at bar centers
-    fig2, ax2 = plt.subplots(figsize=(8, 6))
-    y2 = np.arange(n_runs)
-    total_height2 = 0.8
-    bar_height2 = total_height2 / 4
-
-    # Use distinct colors for the four bar sets
-    second_palette = sns.color_palette("inferno", 4)
-    bars1 = ax2.barh(y2 + bar_height2 * 1.5, sum_reg_avgs, height=bar_height2, label="sum_reg_avg", color=second_palette[0])
-    bars2 = ax2.barh(y2 + bar_height2 * 0.5, sum_reg_dims, height=bar_height2, label="sum_reg_ci_relative_width", color=second_palette[1])
-    bars3 = ax2.barh(y2 - bar_height2 * 0.5, sum_clf_avgs, height=bar_height2, label="sum_clf_avg", color=second_palette[2])
-    bars4 = ax2.barh(y2 - bar_height2 * 1.5, sum_clf_dims, height=bar_height2, label="sum_clf_ci_relative_width", color=second_palette[3])
-
-    ax2.set_yticks(y2)
-    ax2.set_yticklabels(runs)
-    ax2.set_ylabel("Run")
-    ax2.set_xlabel("Value")
-    ax2.set_title("Sum of Averages and Relative CI Width per Run")
-    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    # Annotate bars at their centers
-    for bar in bars1 + bars2 + bars3 + bars4:
-        width = bar.get_width()
-        y_center = bar.get_y() + bar.get_height() / 2
-        ax2.text(
-            width / 2,
-            y_center - 0.015,
-            f"{width:.2f}",
-            color="white",
-            fontweight="bold",
-            fontsize=7,
-            ha="center",
-            va="center"
-        )
-
-    plt.tight_layout()
-    if save:
-        # Save the second figure (last active) to the specified file path
-        suffix = '_summary'
-        save_path = '/'.join(os.path.abspath(__file__).split('/')[:-3]) + '/' + result_plot_file[:-4] + suffix + '.pdf'
-        plt.savefig(save_path, bbox_inches='tight', format='pdf')
-    plt.show()
+    if second_plot:
+        # Prepare data for the second plot
+        sum_reg_avgs = df['sum_reg_avg'].tolist()
+        sum_clf_avgs = df['sum_clf_avg'].tolist()
+        sum_reg_dims = df['sum_reg_ci_relative_width'].tolist()
+        sum_clf_dims = df['sum_clf_ci_relative_width'].tolist()
+    
+        # Create the second plot: horizontal grouped bars for sum values, annotated at bar centers
+        fig2, ax2 = plt.subplots(figsize=figsize)
+        y2 = np.arange(n_runs)
+        total_height2 = 0.8
+        bar_height2 = total_height2 / 4
+    
+        # Use distinct colors for the four bar sets
+        second_palette = sns.color_palette("inferno", 4)
+        bars1 = ax2.barh(y2 + bar_height2 * 1.5, sum_reg_avgs, height=bar_height2, label="sum_reg_avg", color=second_palette[0])
+        bars2 = ax2.barh(y2 + bar_height2 * 0.5, sum_reg_dims, height=bar_height2, label="sum_reg_ci_relative_width", color=second_palette[1])
+        bars3 = ax2.barh(y2 - bar_height2 * 0.5, sum_clf_avgs, height=bar_height2, label="sum_clf_avg", color=second_palette[2])
+        bars4 = ax2.barh(y2 - bar_height2 * 1.5, sum_clf_dims, height=bar_height2, label="sum_clf_ci_relative_width", color=second_palette[3])
+    
+        ax2.set_yticks(y2)
+        ax2.set_yticklabels(runs)
+        ax2.set_ylabel("Run")
+        ax2.set_xlabel("Value")
+        ax2.set_title("Sum of Averages and Relative CI Width per Run")
+        ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left', prop={'size':8})
+    
+        # Annotate bars at their centers
+        for bar in bars1 + bars2 + bars3 + bars4:
+            width = bar.get_width()
+            y_center = bar.get_y() + bar.get_height() / 2
+            ax2.text(
+                width / 2,
+                y_center - 0.015,
+                f"{width:.2f}",
+                color="white",
+                fontweight="bold",
+                fontsize=7,
+                ha="center",
+                va="center"
+            )
+    
+        plt.tight_layout()
+        if save:
+            # Save the second figure (last active) to the specified file path
+            suffix = '_summary'
+            save_path = '/'.join(os.path.abspath(__file__).split('/')[:-3]) + '/' + result_plot_file[:-4] + suffix + '.pdf'
+            plt.savefig(save_path, bbox_inches='tight', format='pdf')
+        plt.show()

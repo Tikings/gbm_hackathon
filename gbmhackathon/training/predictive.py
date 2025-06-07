@@ -139,6 +139,7 @@ class PredictiveLearningDataset(Dataset):
             else:
                 min_list = torch.tensor([tensor.min().item() for tensor in list(self.dict_emb[modality].values())])
                 max_list = torch.tensor([tensor.max().item() for tensor in list(self.dict_emb[modality].values())])
+                print(modality, min_list)
                 m, M = torch.min(min_list).to(self.device), torch.max(max_list).to(self.device)
                 for pid in self.dict_emb[modality].keys():
                     norm_emb = (self.dict_emb[modality][pid].to(self.device) - m) / (M - m)
