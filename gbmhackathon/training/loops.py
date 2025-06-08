@@ -412,6 +412,7 @@ def new_predictive_learning(mme, clm,
                           show_plots=False,
                           device=None,
                           mme_emb_path=None,
+                          joined=False,
                           ):
     device = device if device is not None else clm.device
     tasks = list(clm.config['predictive_cfg']['heads_configs'].keys())
@@ -505,6 +506,7 @@ def new_predictive_learning(mme, clm,
                     device, 
                     optimizer=optimizer, 
                     scheduler=scheduler, 
+                    joined=joined,
                     )
 
         predictive_step(epoch, 
@@ -522,7 +524,8 @@ def new_predictive_learning(mme, clm,
                     v_overall_losses,
                     device, 
                     optimizer=None, 
-                    scheduler=None, 
+                    scheduler=None,
+                    joined=joined,
                     )
         print(f"Epoch {epoch} total training loss: {t_epochs_losses[-1]:.4f}\nEpoch {epoch} total validation loss: {v_epochs_losses[-1]:.4f}".upper(), end='\r')
         if make_gifs:
@@ -601,6 +604,7 @@ def predictive_step(epoch,
                     device, 
                     optimizer=None, 
                     scheduler=None, 
+                    joined=False,
                     ):
     prefix = 'training' if mode == 'train' else 'validation'
     for idx, batch in enumerate(dataloader):
@@ -609,7 +613,13 @@ def predictive_step(epoch,
         # print(batch_targets.size())
         # Forward pass
         if mme is not None:
-            mme.eval()
+            if not joined: # If not joined the mme is only used to encode patients
+                mme.eval()
+            else:
+                if mode == 'train': # If joined, on training mode, mme must be trainable
+                    mme.train()
+                else: # in eval mode we switch to eval
+                    mme.eval()
             contrastive_outputs = mme(X_dict)
 
         if mode == 'train':

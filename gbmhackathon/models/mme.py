@@ -982,6 +982,28 @@ class ClinicalLinkageModule(nn.Module):
         if return_patient_embs:
             return task_outputs, patient_embeddings
         return task_outputs
+
+class JoinedModule(nn.Module):
+    """Module to handle simultaneous training of MME and CLM more easily"""
+    def __init__(self, clm_cfg: Dict, mme_cfg: Union[Dict, None] = None, mme: Union[nn.Module, None] = None):
+        assert (mme_cfg is not None) or (mme is not None), "You must either pass a MultiModalEncoder config or provide an intantiated MultiModalEncoder."
+        super().__init__()
+        self.config = {"mme_cfg":mme_cfg, 
+                       "clm_cfg":clm_cfg}
+        if mme is not None:
+            self.mme = mme
+            self.config["mme_cfg"] = self.mme.config
+        else:
+            self.mme = instantiate(mme_cfg, MultiModalEncoder)
+        self.clm = instantiate(clm_cfg, ClinicalLinkageModule)
+
+    def forward(self, x: Dict[str, torch.Tensor], avail_mods: Union[torch.Tensor, None] = None, return_patient_embs: bool = True):
+        patient_embeddings = self.mme(x)
+
+        clm_outputs = self.clm(patient_embeddings, avail_mods, return_patient_embs)
+        if return_patient_embs:
+            return clm_outputs[0], clm_outputs[1]
+        return clm_outputs
         
 class GBMNet(nn.Module):
     """Global model to learn predictive tasks"""
