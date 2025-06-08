@@ -26,6 +26,7 @@ class PredictiveLearningDataset(Dataset):
                  normalize: bool = True,
                  MIN: float = -1.0,
                  MAX: float = 1.0,
+                 remove_clinical: bool = False,
                  ):
         self.root = root_s3
         self.name_emb = name_emb
@@ -79,7 +80,11 @@ class PredictiveLearningDataset(Dataset):
         self.dict_emb = dict([(key), self.format_dict_keys(self.dict_emb[key],
                                                           PATTERN_PATIENT)]
                              for key in self.dict_emb.keys())
-        
+        self.remove_clinical = remove_clinical
+        if self.remove_clinical:
+            self.dict_emb.pop('clinical')
+            print(self.dict_emb.keys())
+            print("Clinical successfully removed")
         if self.normalize:
             self.normalize_data()
             print("Normalization applied successfully")

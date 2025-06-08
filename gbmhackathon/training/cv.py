@@ -173,7 +173,14 @@ def get_cv_results(reg_dict,
 def get_upper(char):
     return char.upper()
     
-def plot_cv_table(result_file, df=None, save=False, plot=True, out_file="results/cv_results_table.pdf", figsize=(25, 6)):
+def plot_cv_table(result_file, 
+                  df=None, 
+                  clip_runs=False,
+                  max_len=40,
+                  save=False, 
+                  plot=True, 
+                  out_file="results/cv_results_table.pdf",
+                  figsize=(25, 6)):
     """
     Reads `result_file` (cv_results.csv), wraps it in a plottable.Table,
     applies a clean “striped” theme, and displays (or saves) it.
@@ -186,6 +193,8 @@ def plot_cv_table(result_file, df=None, save=False, plot=True, out_file="results
         # 1) Read CSV into DataFrame
         df = pd.read_csv(result_file)
     df['run'] = df['run'].apply(get_upper)
+    if clip_runs:
+        df['run'] = [name[:max_len] + '..' for name in df['run']]
     df['to_rank'] = df[['sum_reg_avg']+[col for col in df.columns if 'up_rmse' in col]].sum(axis=1) + 1/(df[['sum_clf_avg']+[col for col in df.columns if 'low_f1' in col]].sum(axis=1) + 1e-4)
     cols = [col for col in df.columns if 'up_f1' not in col and 'low_rmse' not in col and 'ci' not in col and 'sum' not in col and col not in ['run', 'to_rank']]
 
@@ -226,6 +235,10 @@ def plot_cv_table(result_file, df=None, save=False, plot=True, out_file="results
 
 def plot_results_cv(result_file, 
                     run_filter: str = None, 
+                    baseline='random_baseline',
+                    include_baseline=True,
+                    clip_runs=False,
+                    max_len=40,
                     second_plot=False, 
                     save=False, 
                     figsize=(10,8),
@@ -244,7 +257,15 @@ def plot_results_cv(result_file,
     # Read the results
     df = pd.read_csv(result_file)
     if run_filter is not None:
+        if baseline not in run_filter and include_baseline:
+            run_filter += f'|{baseline}'
         df = df[df['run'].str.contains(run_filter)]
+    if clip_runs:
+        df['run'] = [(name[:max_len] + '..' if len(name) >= max_len else name) for name in df['run']]
+    # Sort values
+    df['to_rank'] = df[['sum_reg_avg']+[col for col in df.columns if 'up_rmse' in col]].sum(axis=1) + 1/(df[['sum_clf_avg']+[col for col in df.columns if 'low_f1' in col]].sum(axis=1) + 1e-4)
+    df = df.set_index("run").round(3).sort_values(by=['to_rank'])
+    df['run'] = df.index
     # Extract run names
     runs = df['run'].tolist()
     n_runs = len(runs)
@@ -291,15 +312,23 @@ def plot_results_cv(result_file,
 
     palette = sns.color_palette("viridis", n_runs)
     bar_containers = []
+    if baseline in runs:
+        baseline_idx = runs.index(baseline)
+    else:
+        baseline_idx = None
     for i, pdata in enumerate(plot_data):
         offsets = y - total_height / 2 + (i + 0.5) * bar_height
+        if (baseline_idx is not None) and (i == baseline_idx):
+            c = 'black'
+        else:
+            c = palette[i]
         bars = ax1.barh(
             offsets,
             pdata['avg'],
             height=bar_height,
             xerr=[pdata['err_low'], pdata['err_up']],
             label=pdata['run'],
-            color=palette[i],
+            color=c,
             capsize=5
         )
         bar_containers.append((bars, pdata))
