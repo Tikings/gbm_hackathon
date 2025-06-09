@@ -356,17 +356,17 @@ def analyze_embeddings(wes_data: pd.DataFrame,
     }
     genes = list(genes_ensembl_ids.values())
 
-    results = []
+    results_bulk = []
     bulk_idx = [i for i in range(full_embeddings.size(0)) if full_patient_list[i] in rdy_pids["bulk"]]
     X_bulk = full_embeddings[bulk_idx,:]
     pids_bulk = [pid + '_mRNA' for pid in rdy_pids['bulk']]
     for gene in genes:
         y_bulk = bulk_data.T.loc[pids_bulk,:][gene].astype(float)
         scaled_y = StandardScaler().fit_transform(y_bulk.values.reshape(-1,1))
-        suffix = f'{prefix}_lp_bulk_scatterplot.pdf' if path_folder.endswith('/') else f'/{prefix}_lp_bulk_scatterplot.pdf'
+        suffix = f'{prefix}_{find_key(genes_ensembl_ids, gene)}_lp_bulk_scatterplot.pdf' if path_folder.endswith('/') else f'/{prefix}_{find_key(genes_ensembl_ids, gene)}_lp_bulk_scatterplot.pdf'
         mse, mae, rmse, scores = linear_probing_reg(X_bulk, y_bulk, model=Lasso, path=path_folder + suffix)
     
-        results.append({
+        results_bulk.append({
             "Gene": find_key(genes_ensembl_ids, gene),
             "MSE": round(mse, 4),
             "MAE": round(mae, 4),
@@ -378,7 +378,7 @@ def analyze_embeddings(wes_data: pd.DataFrame,
             "CV Std RMSE": round(scores.std(), 4)
         })
     
-    results_df_bulk = pd.DataFrame(results)
+    results_df_bulk = pd.DataFrame(results_bulk)
     
     # Visualization
     plt.figure(figsize=(15, 5))
@@ -408,6 +408,9 @@ def analyze_embeddings(wes_data: pd.DataFrame,
     dico = evaluate_embedding_quality(X_raw = X_bulk.cpu().detach().numpy(), Y_raw = y_bulk)
 
     results = {'lp_wes':results_df_wes, 'lp_bulk':results_df_bulk, 'quality_embeddings':pd.DataFrame(dico)}
+    del results_df_bulk
+    del results_df_wes
+    del X_bulk
     suffix = f'{prefix}_results.pkl' if path_folder.endswith('/') else f'/{prefix}_results.pkl'
     with open(path_folder + suffix, 'wb') as f:
         pkl.dump(results, f)
