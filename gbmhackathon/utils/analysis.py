@@ -360,7 +360,7 @@ def analyze_embeddings(wes_data: pd.DataFrame,
             "MAE": round(mae, 4),
             "RMSE": round(rmse, 4),
             "Y_min": round(scaled_y.min(), 4),
-            "Y_avg": round(scaled_y.mean(), 4),
+            "Y_nonnull_median": round(np.median(scaled_y[np.abs(y_bulk) > 1e-2]), 4),
             "Y_max": round(scaled_y.max(), 4),
             "CV Mean RMSE": round(scores.mean(), 4),
             "CV Std RMSE": round(scores.std(), 4)
@@ -369,7 +369,7 @@ def analyze_embeddings(wes_data: pd.DataFrame,
     results_df_bulk = pd.DataFrame(results)
     
     # Visualization
-    plt.figure(figsize=(12, 5))
+    plt.figure(figsize=(15, 5))
     sns.set(style="whitegrid")
     
     # Ensure the correct numeric format and index setup
