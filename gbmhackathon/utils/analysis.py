@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso, Ridge
 from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
 
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, cross_val_predict
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error, root_mean_squared_error
 from sklearn.manifold import trustworthiness
@@ -119,7 +119,7 @@ def linear_probing_clf(X, y, model=LogisticRegression, cv=5):
 
     return acc, roc, cr, scores
 
-def linear_probing_reg(X, y, model=LinearRegression, cv=5):
+def linear_probing_reg(X, y, model=LinearRegression, cv=5, path='lp_bulk_scatterplot.pdf'):
     """
     Performs linear probing using a regression model (default is LinearRegression)
     to evaluate how well the features predict a continuous target variable.
@@ -182,10 +182,21 @@ def linear_probing_reg(X, y, model=LinearRegression, cv=5):
     print("Mean Absolute Error (MAE):", mae)
     print("RMSE Score:", rmse)
     print(f"Y_min: {y.min()}, Y_max: {y.max()}")
-
+    
+    y_pred = cross_val_predict(reg, X, y, cv=cv)
     scores = cross_val_score(reg, X, y, cv=cv, scoring='neg_root_mean_squared_error')
     print("Mean RMSE (CV):", -scores.mean())
-
+    print('9th percentile', np.percentile(y, 0.95))
+    y_filtered = y[(y > np.percentile(y, 2.5)) & (y <= np.percentile(y, 97.5))]
+    plt.scatter(y, y_pred, c=np.abs(y-y_pred))
+    plt.plot(y_filtered, y_filtered, label='Perfect predictions (2.5,97.5)')
+    plt.xlabel("Y_true")
+    plt.ylabel("Y_predicted")
+    plt.colorbar(label="|Y_true-Y_predicted|")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(path, bbox_inches='tight', format='pdf')
+    plt.show()
     return mse, mae, rmse, -scores
 
 def find_key(dictionary, value_to_find):
@@ -352,7 +363,8 @@ def analyze_embeddings(wes_data: pd.DataFrame,
     for gene in genes:
         y_bulk = bulk_data.T.loc[pids_bulk,:][gene].astype(float)
         scaled_y = StandardScaler().fit_transform(y_bulk.values.reshape(-1,1))
-        mse, mae, rmse, scores = linear_probing_reg(X_bulk, y_bulk, model=Lasso)
+        suffix = f'{prefix}_lp_bulk_scatterplot.pdf' if path_folder.endswith('/') else f'/{prefix}_lp_bulk_scatterplot.pdf'
+        mse, mae, rmse, scores = linear_probing_reg(X_bulk, y_bulk, model=Lasso, path=path_folder + suffix)
     
         results.append({
             "Gene": find_key(genes_ensembl_ids, gene),
