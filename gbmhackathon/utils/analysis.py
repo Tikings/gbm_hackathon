@@ -1,4 +1,6 @@
 import numpy as np
+import pickle as pkl
+import os
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -6,13 +8,386 @@ from sklearn.manifold import MDS
 from sklearn.metrics import silhouette_score
 from sklearn.neighbors import KNeighborsClassifier
 import pandas as pd
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 from matplotlib.colors import ListedColormap
 import scipy.spatial.distance as distance
 from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso, Ridge
+from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
+
+from sklearn.model_selection import cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.manifold import trustworthiness
+from scipy.spatial import procrustes
 
 from gbmhackathon.utils.loss_functions import RankMe
+from gbmhackathon.viz.viz_experiment import visualize_embeddings
+from gbmhackathon.models.mme import concat_modality_embeddings
+from gbmhackathon.utils.model_saving import CPU_Unpickler
 
+def prepare_embeddings(emb_dict, batch_all):
+    patient_list, modality_list, avail_mods = batch_all[0], batch_all[1], batch_all[3]
+    return get_filtered_info(emb_dict, avail_mods, patient_list, modality_list)
+
+def get_modality_keys(row, avail_mods, modality_list):
+    avail_mod_row = avail_mods[row]
+    return [mod for i, mod in enumerate(modality_list) if avail_mod_row[i] == 1]
+
+def get_row_id(i, patient_list):
+    return patient_list[i]
+    
+def get_filter(tensor, modality, avail_mods, modality_list):
+    keep_row = []
+    for i in range(tensor.size(0)):
+        if modality in get_modality_keys(i, avail_mods, modality_list):
+            keep_row.append(i)
+    return keep_row
+
+def filter_embeddings(mme_embeddings, modality, avail_mods, modality_list):
+    return mme_embeddings[get_filter(mme_embeddings, modality, avail_mods, modality_list),:]
+
+def get_filtered_info(mme_emb_dict, avail_mods, patient_list, modality_list):
+    filtered_dict = {}
+    filtered_ids_dict = {}
+    for key in mme_emb_dict.keys():
+        filtered_dict[key] = filter_embeddings(mme_emb_dict[key], key, avail_mods, modality_list)
+        row_filter = get_filter(mme_emb_dict[key], key, avail_mods, modality_list)
+        filtered_ids_dict[key] = [get_row_id(i, patient_list) for i in row_filter]
+    return filtered_dict, filtered_ids_dict
+
+os.environ["SCIPY_ARRAY_API"]="1"
+def linear_probing_clf(X, y, model=LogisticRegression, cv=5):
+    """
+    Performs linear probing using a logistic regression model (or compatible classifier)
+    to evaluate the predictive power of features with respect to a binary target.
+
+    Parameters:
+    ----------
+    X : array-like or tensor
+        Feature matrix. If `X` is a PyTorch tensor, it will be converted to a NumPy array.
+    y : array-like or pandas Series
+        Binary target labels. If `y` is a pandas Series, it will be converted to a NumPy array.
+    model : sklearn-like classifier, optional
+        A classifier class with scikit-learn interface. Defaults to `LogisticRegression`.
+    cv : int, optional
+        Number of cross-validation folds. Defaults to 5.
+
+    Returns:
+    -------
+    acc : float
+        Accuracy score on the held-out test set.
+    roc : float
+        ROC AUC score on the held-out test set.
+    cr : str
+        Text summary of the classification report.
+    scores : ndarray
+        Array of cross-validated ROC AUC scores.
+
+    Notes:
+    -----
+    - Uses `train_test_split` to divide the data into 80% training and 20% test set.
+    - The classifier is trained with class balancing (`class_weight='balanced'`) and max_iter=1000.
+    - The model is evaluated using Accuracy, ROC AUC, and a detailed classification report.
+    - Cross-validation scores are based on ROC AUC.
+    """
+    if hasattr(X, 'numpy'):
+        X = X.detach().numpy()
+    if hasattr(y, 'values'):
+        y = y.values
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    clf = model(max_iter=1000, class_weight='balanced', C=10)
+    clf.fit(X_train, y_train)
+
+    y_pred = clf.predict(X_test)
+    y_prob = clf.predict_proba(X_test)[:, 1]
+
+    acc = accuracy_score(y_test, y_pred)
+    roc = roc_auc_score(y_test, y_prob)
+    cr = classification_report(y_test, y_pred)
+    print("Accuracy:", acc)
+    print("ROC AUC:", roc)
+    print("Classification Report:\n", cr)
+
+    scores = cross_val_score(clf, X, y, cv=cv, scoring='roc_auc')
+    print("Mean ROC AUC (CV):", scores.mean())
+
+    return acc, roc, cr, scores
+
+def linear_probing_reg(X, y, model=LinearRegression, cv=5):
+    """
+    Performs linear probing using a regression model (default is LinearRegression)
+    to evaluate how well the features predict a continuous target variable.
+
+    Parameters:
+    ----------
+    X : array-like or tensor
+        Feature matrix. If `X` is a PyTorch tensor, it will be converted to a NumPy array.
+    y : array-like or pandas Series
+        Continuous target values. If `y` is a pandas Series, it will be converted to a NumPy array.
+    model : sklearn-like regressor, optional
+        A regression model class with scikit-learn interface. Defaults to `LinearRegression`.
+    cv : int, optional
+        Number of cross-validation folds. Defaults to 5.
+
+    Returns:
+    -------
+    mse : float
+        Mean Squared Error on the test set.
+    mae : float
+        Mean Absolute Error on the test set.
+    r2 : float
+        R² (coefficient of determination) score on the test set.
+    scores : ndarray
+        Array of cross-validated R² scores.
+
+    Notes:
+    -----
+    - This function uses `train_test_split` to divide the dataset into 80% training and 20% testing.
+    - It fits the regression model on the training data and evaluates performance on the test data.
+    - Performance is assessed using MSE, MAE, and R² score.
+    - It also performs k-fold cross-validation (default 5 folds) using the R² score.
+    - If inputs are PyTorch tensors or pandas Series, they are automatically converted to NumPy arrays.
+    """
+    if hasattr(X, 'numpy'):
+        X = X.detach().numpy()
+    if hasattr(y, 'values'):
+        y = y.values
+
+    x_scaler = StandardScaler()
+    y_scaler = StandardScaler()
+
+    X = x_scaler.fit_transform(X.reshape(-1, X.shape[-1]) if X.ndim == 1 else X)
+    y = y_scaler.fit_transform(y.reshape(-1, 1)).flatten()
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    reg = model()
+    reg.fit(X_train, y_train)
+
+    y_pred = reg.predict(X_test)
+
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+
+    print("Mean Squared Error (MSE):", mse)
+    print("Mean Absolute Error (MAE):", mae)
+    print("R² Score:", r2)
+
+    scores = cross_val_score(reg, X, y, cv=cv, scoring='r2')
+    print("Mean R² (CV):", scores.mean())
+
+    return mse, mae, r2, scores
+
+def find_key(dictionary, value_to_find):
+    keys = [k for k, v in dictionary.items() if v == value_to_find]
+    return keys[0]
+
+def evaluate_embedding_quality(X_raw, Y_raw, n_neighbors=5):
+    """
+    Evaluates the quality of the embedding Y with respect to the original binary input X.
+
+    Parameters:
+        X_raw (np.ndarray): Original binary input matrix (samples x features)
+        Y_raw (np.ndarray): Continuous embedding (samples x embedding_dim)
+        n_neighbors (int): Number of neighbors for trustworthiness computation
+
+    Returns:
+        dict containing metrics: MSE, R², trustworthiness, Procrustes disparity
+    """
+    # Scaling
+    scaler_x = StandardScaler()
+    scaler_y = StandardScaler()
+    X_scaled = scaler_x.fit_transform(X_raw)
+    Y_scaled = scaler_y.fit_transform(Y_raw)
+
+    metrics = {}
+
+    ## 1. Regression Y → X
+    reg = Lasso() #Ridge()
+    reg.fit(Y_scaled, X_scaled)
+    X_pred = reg.predict(Y_scaled)
+
+    metrics["mse"] = [mean_squared_error(X_scaled, X_pred)]
+    metrics["r2"] = [r2_score(X_scaled, X_pred)]
+
+    ## 2. Trustworthiness (local neighborhood preservation)
+    try:
+        trust = trustworthiness(X_scaled, Y_scaled, n_neighbors=n_neighbors)
+        metrics["trustworthiness"] = [trust]
+    except Exception as e:
+        metrics["trustworthiness"] = [f"Error: {str(e)}"]
+
+    ## 3. Procrustes (global geometric alignment)
+    min_dim = min(X_scaled.shape[1], Y_scaled.shape[1])
+    _, _, disparity = procrustes(X_scaled[:, :min_dim], Y_scaled[:, :min_dim])
+    metrics["procrustes_disparity"] = [disparity]
+
+    return metrics
+    
+def analyze_embeddings(wes_data: pd.DataFrame, 
+                       bulk_data: pd.DataFrame, 
+                       batch_all: tuple,
+                       prefix: str,
+                       path_folder:str,
+                       emb_path: Union[str, None] = None, 
+                       batch: Union[torch.Tensor, None] = None,
+                       show: bool = True,
+                      ):
+    assert emb_path is not None or batch is not None, "You mus either provide a path or the compete batch tensor"
+    os.makedirs(path_folder, exist_ok=True) # To ensure that we can save 
+    
+    # Loading section
+    if emb_path is not None:
+        with open(emb_path, 'rb') as f:
+            embeddings = CPU_Unpickler(f).load()
+    elif batch is not None:
+        embeddings = batch
+    rdy_embs, rdy_pids = prepare_embeddings(embeddings, batch_all)
+
+    # Visualize the whole dataset
+    visualize_embeddings(concat_modality_embeddings(embeddings), 
+                         method='pca', 
+                         cluster_method='optics',
+                         return_fig=True,
+                        )
+    suffix = f'{prefix}_dataset_pca_optics.pdf' if path_folder.endswith('/') else f'/{prefix}_dataset_pca_optics.pdf'
+    plt.savefig(path_folder + suffix, bbox_inches='tight', format='pdf')
+    if show:
+        plt.show()
+    visualize_embeddings(concat_modality_embeddings(embeddings), 
+                         method='umap', 
+                         cluster_method='optics',
+                         return_fig=True
+                        )
+    suffix = f'{prefix}_dataset_umap_optics.pdf' if path_folder.endswith('/') else f'/{prefix}_dataset_umap_optics.pdf'
+    plt.savefig(path_folder + suffix, bbox_inches='tight', format='pdf')
+    if show:
+        plt.show()
+
+    # List of genes to evaluate
+    genes = ["TP53", # Common tumour marker. This gene ie for the protein that "guards" cell DNA against degradation.
+             "EGFR", # Often overexpressed when amplified
+             "PTEN", # Tumour supressor, regulates important pathways. Lost or mutated in GBM cells
+             "NF1", # Tumour supressor, RAS signaling inhibition, when lost, leads to uncontrolled cell growth in GBM
+             "PIK3CA", # Catalityc subunit of PI3K, promotes cell survival in GBM tumours when activated
+             "PIK3R1"] # Regulatory subunit of PI3K, same as PI3KCA
+    
+    results = []
+    X_wes = rdy_embs["wes"]
+    # Run linear probing for each gene and collect metrics
+    for gene in genes:
+        y_wes = wes_data.loc[rdy_pids['wes'],:][gene].astype(int)
+    
+        acc, roc, cr, scores = linear_probing_clf(X_wes, y_wes)
+    
+        results.append({
+            "Gene": gene,
+            "Accuracy": round(acc, 4),
+            "ROC AUC": round(roc, 4),
+            "CV Mean ROC AUC": round(scores.mean(), 4),
+            "CV Std ROC AUC": round(scores.std(), 4)
+        })
+    
+    results_df_wes = pd.DataFrame(results)
+    plt.figure(figsize=(10, 4))
+    sns.set(style="whitegrid")
+    
+    sns.heatmap(
+        results_df_wes.set_index("Gene"),
+        annot=True,
+        fmt=".4f",
+        cmap="YlGnBu",
+        cbar=False,
+        linewidths=0.6,
+        linecolor="lightgray",
+        annot_kws={"fontsize": 12}
+    )
+    
+    plt.title("Linear Probing Metrics per Gene", fontsize=14, weight='bold')
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+    suffix = f'{prefix}_linear_probing_wes.pdf' if path_folder.endswith('/') else f'/{prefix}_linear_probing_wes.pdf'
+    plt.savefig(path_folder + suffix, bbox_inches='tight', format='pdf')
+    plt.show()
+
+    genes_ensembl_ids = {
+    "EGFR": "ENSG00000146648", # Often overexpressed when amplified
+    "PDGFRA": "ENSG00000134853", # Not in original list, but important in proneural subtype
+    "NF1": "ENSG00000196712", # Lower expression linked to mesenchymal subtype
+    "CDKN2A": "ENSG00000147889", # Often deleted; absence confirmed by low/no expression
+    "IDH1": "ENSG00000138413", # Wild-type shows baseline; mutant IDH1 may be expressed in low-grade gliomas
+    "MGMT": "ENSG00000170430", # Expression level predicts response to alkylating agents
+    "TERT": "ENSG00000164362", # Promoter mutation leads to upregulation, measurable by RNA-seq
+    "MDM2": "ENSG00000135679", # Overexpression can suppress p53
+    "CHI3L1": "ENSG00000133048", # Not on original list, but highly upregulated in mesenchymal GBM
+    "VEGFA": "ENSG00000112715", # Angiogenesis-related, overexpressed in GBM
+    "SOX2": "ENSG00000181449", # Stemness marker; overexpressed in proneural subtype
+    "OLIG2": "ENSG00000205927", # Highly expressed in proneural tumors
+    "CD44": "ENSG00000026508", # Mesenchymal subtype marker, elevated in RNA-seq
+    }
+    genes = list(genes_ensembl_ids.values())
+
+    results = []
+    X_bulk = rdy_embs["bulk"]
+    pids_bulk = [pid + '_mRNA' for pid in rdy_pids['bulk']]
+    for gene in genes:
+        y_bulk = bulk_data.T.loc[pids_bulk,:][gene].astype(float)
+        mse, mae, r2, scores = linear_probing_reg(X_bulk, y_bulk, model=Lasso)
+    
+        results.append({
+            "Gene": find_key(genes_ensembl_ids, gene),
+            "MSE": round(mse, 4),
+            "MAE": round(mae, 4),
+            "R²": round(r2, 4),
+            "CV Mean R²": round(scores.mean(), 4),
+            "CV Std R²": round(scores.std(), 4)
+        })
+    
+    results_df_bulk = pd.DataFrame(results)
+    
+    # Visualization
+    plt.figure(figsize=(12, 5))
+    sns.set(style="whitegrid")
+    
+    # Ensure the correct numeric format and index setup
+    sns.heatmap(
+        results_df_bulk.set_index("Gene"),
+        annot=True,
+        fmt=".4f",
+        cmap="YlGnBu",
+        cbar=True,
+        linewidths=0.6,
+        linecolor="lightgray",
+        annot_kws={"fontsize": 11}
+    )
+    
+    plt.title("Linear Regression Probing Metrics per Gene", fontsize=14, weight='bold')
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+    suffix = f'{prefix}_linear_probing_bulk.pdf' if path_folder.endswith('/') else f'/{prefix}_linear_probing_bulk.pdf'
+    plt.savefig(path_folder + suffix, bbox_inches='tight', format='pdf')
+    plt.show()
+
+    y_bulk = bulk_data.T.loc[pids_bulk,:].astype(int)
+    dico = evaluate_embedding_quality(X_raw = X_bulk.cpu().detach().numpy(), Y_raw = y_bulk)
+
+    results = {'lp_wes':results_df_wes, 'lp_bulk':results_df_bulk, 'quality_embeddings':pd.DataFrame(dico)}
+    suffix = f'{prefix}_results.pkl' if path_folder.endswith('/') else f'/{prefix}_results.pkl'
+    with open(path_folder + suffix, 'wb') as f:
+        pkl.dump(results, f)
+    return results
+    
 def compute_embedding_quality_metrics(
     embeddings: torch.Tensor,
     zero_threshold: float = 1e-2,

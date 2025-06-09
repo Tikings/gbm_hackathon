@@ -235,7 +235,7 @@ def plot_cv_table(result_file,
 
 def plot_results_cv(result_file, 
                     run_filter: str = None, 
-                    baseline='random_baseline',
+                    baseline=['random_baseline', 'linear_baseline'],
                     include_baseline=True,
                     clip_runs=False,
                     max_len=40,
@@ -257,8 +257,9 @@ def plot_results_cv(result_file,
     # Read the results
     df = pd.read_csv(result_file)
     if run_filter is not None:
-        if baseline not in run_filter and include_baseline:
-            run_filter += f'|{baseline}'
+        for b in baseline:
+            if b not in run_filter and include_baseline:
+                run_filter += '|' + b
         df = df[df['run'].str.contains(run_filter)]
     if clip_runs:
         df['run'] = [(name[:max_len] + '..' if len(name) >= max_len else name) for name in df['run']]
@@ -312,13 +313,15 @@ def plot_results_cv(result_file,
 
     palette = sns.color_palette("viridis", n_runs)
     bar_containers = []
-    if baseline in runs:
-        baseline_idx = runs.index(baseline)
-    else:
-        baseline_idx = None
+    baseline_indices = []
+    for run in baseline:
+        if run in runs:
+            baseline_indices.append(runs.index(run))
+        else:
+            baseline_indices.append(None)
     for i, pdata in enumerate(plot_data):
         offsets = y - total_height / 2 + (i + 0.5) * bar_height
-        if (baseline_idx is not None) and (i == baseline_idx):
+        if (baseline_indices != [None]*len(baseline)) and (i in baseline_indices):
             c = 'black'
         else:
             c = palette[i]
