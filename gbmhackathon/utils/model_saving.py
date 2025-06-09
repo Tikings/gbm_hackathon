@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-import os
+import os, io
 import pickle as pkl
 from typing import Union, ClassVar, Tuple, Dict
 from pathlib import Path
@@ -51,3 +51,11 @@ def update_cfg_device(cfg_dict: Dict, device: Union[str, torch.device]):
             elif 'device' not in val.keys():
                 update_cfg_device(val, device)
     return cfg_dict
+
+class CPU_Unpickler(pkl.Unpickler):
+    """Solution to open the embedding file.
+    from: https://stackoverflow.com/questions/56369030/runtimeerror-attempting-to-deserialize-object-on-a-cuda-device"""
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+        else: return super().find_class(module, name)
