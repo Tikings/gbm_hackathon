@@ -18,7 +18,7 @@ from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
 
 from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error, root_mean_squared_error
 from sklearn.manifold import trustworthiness
 from scipy.spatial import procrustes
 
@@ -141,8 +141,8 @@ def linear_probing_reg(X, y, model=LinearRegression, cv=5):
         Mean Squared Error on the test set.
     mae : float
         Mean Absolute Error on the test set.
-    r2 : float
-        R² (coefficient of determination) score on the test set.
+    rmse : float
+        RMSE score on the test set.
     scores : ndarray
         Array of cross-validated R² scores.
 
@@ -176,16 +176,17 @@ def linear_probing_reg(X, y, model=LinearRegression, cv=5):
 
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
+    rmse = root_mean_squared_error(y_test, y_pred)
 
     print("Mean Squared Error (MSE):", mse)
     print("Mean Absolute Error (MAE):", mae)
-    print("R² Score:", r2)
+    print("RMSE Score:", rmse)
+    print(f"Y_min: {y.min()}, Y_max: {y.max()}")
 
-    scores = cross_val_score(reg, X, y, cv=cv, scoring='r2')
-    print("Mean R² (CV):", scores.mean())
+    scores = cross_val_score(reg, X, y, cv=cv, scoring='neg_root_mean_squared_error')
+    print("Mean RMSE (CV):", -scores.mean())
 
-    return mse, mae, r2, scores
+    return mse, mae, rmse, -scores
 
 def find_key(dictionary, value_to_find):
     keys = [k for k, v in dictionary.items() if v == value_to_find]
@@ -217,7 +218,7 @@ def evaluate_embedding_quality(X_raw, Y_raw, n_neighbors=5):
     X_pred = reg.predict(Y_scaled)
 
     metrics["mse"] = [mean_squared_error(X_scaled, X_pred)]
-    metrics["r2"] = [r2_score(X_scaled, X_pred)]
+    metrics["rmse"] = [root_mean_squared_error(X_scaled, X_pred)]
 
     ## 2. Trustworthiness (local neighborhood preservation)
     try:
@@ -319,7 +320,7 @@ def analyze_embeddings(wes_data: pd.DataFrame,
         annot_kws={"fontsize": 12}
     )
     
-    plt.title("Linear Probing Metrics per Gene", fontsize=14, weight='bold')
+    plt.title(f"Linear Probing Metrics per Gene", fontsize=14, weight='bold')
     plt.xticks(rotation=45, ha='right')
     plt.yticks(rotation=0)
     plt.tight_layout()
@@ -350,15 +351,19 @@ def analyze_embeddings(wes_data: pd.DataFrame,
     pids_bulk = [pid + '_mRNA' for pid in rdy_pids['bulk']]
     for gene in genes:
         y_bulk = bulk_data.T.loc[pids_bulk,:][gene].astype(float)
-        mse, mae, r2, scores = linear_probing_reg(X_bulk, y_bulk, model=Lasso)
+        scaled_y = StandardScaler().fit_transform(y_bulk.values.reshape(-1,1))
+        mse, mae, rmse, scores = linear_probing_reg(X_bulk, y_bulk, model=Lasso)
     
         results.append({
             "Gene": find_key(genes_ensembl_ids, gene),
             "MSE": round(mse, 4),
             "MAE": round(mae, 4),
-            "R²": round(r2, 4),
-            "CV Mean R²": round(scores.mean(), 4),
-            "CV Std R²": round(scores.std(), 4)
+            "RMSE": round(rmse, 4),
+            "Y_min": round(scaled_y.min(), 4),
+            "Y_avg": round(scaled_y.mean(), 4),
+            "Y_max": round(scaled_y.max(), 4),
+            "CV Mean RMSE": round(scores.mean(), 4),
+            "CV Std RMSE": round(scores.std(), 4)
         })
     
     results_df_bulk = pd.DataFrame(results)
