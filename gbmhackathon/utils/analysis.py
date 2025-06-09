@@ -250,9 +250,15 @@ def analyze_embeddings(wes_data: pd.DataFrame,
         with open(emb_path, 'rb') as f:
             embeddings = CPU_Unpickler(f).load()
     elif batch is not None:
-        embeddings = batch
+        modality_list = batch_all[1]
+        embeddings = {}
+        emb_size = int(batch.size(1)/len(modality_list))
+        for i, key in enumerate(modality_list):
+            embeddings[key] = batch[:,i*emb_size:(i+1)*emb_size]
     rdy_embs, rdy_pids = prepare_embeddings(embeddings, batch_all)
-
+    full_embeddings = concat_modality_embeddings(embeddings)
+    full_patient_list = batch_all[0]
+    
     # Visualize the whole dataset
     visualize_embeddings(concat_modality_embeddings(embeddings), 
                          method='pca', 
@@ -282,7 +288,8 @@ def analyze_embeddings(wes_data: pd.DataFrame,
              "PIK3R1"] # Regulatory subunit of PI3K, same as PI3KCA
     
     results = []
-    X_wes = rdy_embs["wes"]
+    wes_idx = [i for i in range(full_embeddings.size(0)) if full_patient_list[i] in rdy_pids["wes"]]
+    X_wes = full_embeddings[wes_idx,:]
     # Run linear probing for each gene and collect metrics
     for gene in genes:
         y_wes = wes_data.loc[rdy_pids['wes'],:][gene].astype(int)
@@ -338,7 +345,8 @@ def analyze_embeddings(wes_data: pd.DataFrame,
     genes = list(genes_ensembl_ids.values())
 
     results = []
-    X_bulk = rdy_embs["bulk"]
+    bulk_idx = [i for i in range(full_embeddings.size(0)) if full_patient_list[i] in rdy_pids["bulk"]]
+    X_bulk = full_embeddings[bulk_idx,:]
     pids_bulk = [pid + '_mRNA' for pid in rdy_pids['bulk']]
     for gene in genes:
         y_bulk = bulk_data.T.loc[pids_bulk,:][gene].astype(float)
